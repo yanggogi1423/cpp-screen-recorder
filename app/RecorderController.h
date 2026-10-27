@@ -57,6 +57,7 @@ public:
     Q_INVOKABLE void setOutputFolder(QUrl folder);
     Q_INVOKABLE void toggleRecording();
     Q_INVOKABLE void openOutputFolder();
+    Q_INVOKABLE void openRecording(QUrl file);
     Q_INVOKABLE void clearMessage();
     Q_INVOKABLE void exportTrim(double startSeconds,double endSeconds,bool overwrite);
 signals:

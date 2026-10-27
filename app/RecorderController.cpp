@@ -109,6 +109,7 @@ void RecorderController::startNow(){
     setState("starting");try{session_.start(platform_.get(),video_.get(),settings_,selected);}catch(const std::exception& ex){setState("idle");showMessage(QString::fromUtf8(ex.what()));}
 }
 void RecorderController::openOutputFolder(){QDesktopServices::openUrl(QUrl::fromLocalFile(lastFile_.isEmpty()?settings_.outputFolder:QFileInfo(lastFile_).absolutePath()));}
+void RecorderController::openRecording(QUrl file){if(state_!="idle"||!file.isLocalFile()||!QFileInfo::exists(file.toLocalFile()))return;lastFile_=file.toLocalFile();emit lastFileChanged();emit editorRequested();}
 void RecorderController::exportTrim(double start,double end,bool overwrite){
     if(state_!="idle")return;
     if(!std::isfinite(start)||!std::isfinite(end)||start<0||end<=start||!QFileInfo::exists(lastFile_)){showMessage("자르기 시작·종료 시간을 확인해 주세요.");return;}

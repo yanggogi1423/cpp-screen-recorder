@@ -50,6 +50,9 @@ int main(int argc,char** argv){
     engine.loadFromModule("Luma","Main");if(engine.rootObjects().isEmpty())return 1;
     if(arguments.contains("--capture-test")){
 #ifdef Q_OS_WIN
+        QDir().mkpath("artifacts");QFile::remove("artifacts/capture-error.txt");QFile::remove("artifacts/capture-result.json");
+        auto* animation=new QTimer(&app);animation->setInterval(50);
+        QObject::connect(animation,&QTimer::timeout,&app,[&]{auto* root=engine.rootObjects().first();root->setProperty("captureTestTick",root->property("captureTestTick").toInt()+1);});animation->start();
         auto platform=std::shared_ptr<luma::Platform>(luma::createPlatform());
         auto capture=std::shared_ptr<luma::VideoCapture>(platform->createVideoCapture());
         auto session=std::make_shared<luma::RecordingSession>();
@@ -69,6 +72,9 @@ int main(int argc,char** argv){
         QTimer::singleShot(600,&app,[&,platform,capture,session,tone1,tone2,mix1,mix2]{
             try{
                 auto* window=qobject_cast<QQuickWindow*>(engine.rootObjects().first());
+                // WGC cannot capture a hidden HWND. Show only our own test window,
+                // without activating it or changing the user's foreground app.
+                ShowWindow(reinterpret_cast<HWND>(window->winId()),SW_SHOWNOACTIVATE);
                 luma::Source source{QString::number(quintptr(window->winId())),"Luma self-test",luma::SourceKind::Window,QRect(0,0,1380,920)};
                 capture->start(source,{},true,[&](QString error){QFile out("artifacts/capture-error.txt");out.open(QIODevice::WriteOnly);out.write(error.toUtf8());});
                 QTimer::singleShot(800,&app,[&,platform,capture,session,tone1,tone2,mix1,mix2]{
@@ -88,6 +94,21 @@ int main(int argc,char** argv){
 #else
         return 6;
 #endif
+    }
+    if(arguments.contains("--edit-test")){
+        const auto input=arguments.value(arguments.indexOf("--edit-test")+1);
+        controller.openRecording(QUrl::fromLocalFile(input));
+        QObject::connect(&controller,&RecorderController::trimFinished,&app,[&](QUrl file){
+            QFile result("artifacts/edit-result.json");result.open(QIODevice::WriteOnly);result.write(QJsonDocument(QJsonObject{{"file",file.toLocalFile()}}).toJson());app.exit(0);
+        });
+        QTimer::singleShot(2500,&app,[&]{
+            auto* player=engine.rootObjects().first()->findChild<QObject*>("editorPlayer");
+            if(!player||player->property("duration").toLongLong()<2500){QFile out("artifacts/edit-error.txt");out.open(QIODevice::WriteOnly);out.write("Media player did not load the test video");app.exit(7);return;}
+            // The UI choice must exist; overwrite is selected only by an explicit flag.
+            player->setProperty("source",QUrl());
+            controller.exportTrim(.5,2.5,arguments.contains("--overwrite"));
+        });
+        QTimer::singleShot(20000,&app,[]{QCoreApplication::exit(8);});
     }
     if(app.arguments().contains("--ui-smoke")){
         QTimer::singleShot(1000,&app,[&]{

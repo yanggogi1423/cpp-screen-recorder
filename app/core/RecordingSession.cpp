@@ -45,7 +45,7 @@ QStringList RecordingSession::videoArguments(const Settings& s,QSize input,const
 RecordingSession::~RecordingSession(){stop_=true;if(thread_.joinable())thread_.join();}
 void RecordingSession::start(Platform* platform,VideoCapture* video,const Settings& settings,const QList<AudioSource>& sources){
     settings.validate();if(thread_.joinable())thread_.join();stop_=false;frames_=0;
-    thread_=std::jthread([=,this]{run(platform,video,settings,sources);});
+    thread_=std::thread([=,this]{run(platform,video,settings,sources);});
 }
 void RecordingSession::run(Platform* platform,VideoCapture* video,Settings s,QList<AudioSource> sources){
     QString folder;

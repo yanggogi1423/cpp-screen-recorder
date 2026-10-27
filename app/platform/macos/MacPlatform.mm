@@ -7,6 +7,7 @@
 #include <QMutexLocker>
 #include <future>
 #include <mutex>
+#include <unistd.h>
 
 // Objective-C++ stays behind the same C++ interface as the Windows backend.
 @interface LumaStreamOutput:NSObject<SCStreamOutput,SCStreamDelegate> {

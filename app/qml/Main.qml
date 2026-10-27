@@ -16,6 +16,7 @@ ApplicationWindow {
     property int mode: 0
     property string displayId: displayCombo.currentValue || ""
     property bool closeAfterSave: false
+    property int captureTestTick: -1
     palette.text: "#e5e4f0"; palette.window: "#191b24"; palette.button: "#252735"
     palette.base: "#13151d"; palette.buttonText: "#eeeefa"; palette.highlight: "#9270fa"
 
@@ -51,6 +52,7 @@ ApplicationWindow {
         function onStateChanged() { if (root.closeAfterSave && recorder.state === "idle") Qt.quit() }
     }
     FolderDialog { id: folderDialog; title: "녹화 저장 폴더"; onAccepted: recorder.setOutputFolder(selectedFolder) }
+    FileDialog { id: recordingDialog; title: "편집할 녹화 영상"; nameFilters: ["영상 파일 (*.mkv *.mp4 *.mov)"]; onAccepted: recorder.openRecording(selectedFile) }
 
     RowLayout {
         anchors.fill: parent; spacing: 0
@@ -107,6 +109,7 @@ ApplicationWindow {
                                     onPaint: { var c = getContext("2d"); c.strokeStyle = "#181a23"; c.lineWidth = 1; for(var x=0;x<width;x+=28){c.beginPath();c.moveTo(x,0);c.lineTo(x,height);c.stroke()} for(var y=0;y<height;y+=28){c.beginPath();c.moveTo(0,y);c.lineTo(width,y);c.stroke()} }
                                 }
                                 Image { anchors.fill: parent; anchors.margins: 1; visible: recorder.hasSource; source: recorder.hasSource ? "image://preview/" + recorder.previewRevision : ""; cache: false; fillMode: Image.PreserveAspectFit; asynchronous: false }
+                                Rectangle { visible: root.captureTestTick >= 0; width: 100; height: 45; x: (root.captureTestTick*7)%Math.max(1,parent.width-100); y: 35; color: root.captureTestTick%2 ? "#9270fa" : "#7ecdb1"; Text { anchors.centerIn: parent; text: root.captureTestTick; color: "#14121b"; font.pixelSize: 20 } }
                                 Column {
                                     visible: !recorder.hasSource; anchors.centerIn: parent; spacing: 16
                                     Rectangle {
@@ -152,11 +155,12 @@ ApplicationWindow {
                         Caption { text: "Ctrl + Shift + R"; color: "#bbb1d3"; font.pixelSize: 11 }
                         Caption { text: "시작 / 종료  ·  앱에 포커스가 있을 때"; font.pixelSize: 11 }
                         Item { Layout.fillWidth: true }
+                        ActionButton { text: "영상 열기"; implicitHeight: 32; enabled: root.idle; onClicked: recordingDialog.open() }
                         ActionButton { text: "최근 영상 편집"; implicitHeight: 32; enabled: root.idle && recorder.lastFile.toString().length > 0; onClicked: editor.open() }
                     }
                 }
                 ColumnLayout {
-                    Layout.preferredWidth: 330; Layout.fillHeight: true; spacing: 16
+                    Layout.preferredWidth: 350; Layout.minimumWidth: 330; Layout.maximumWidth: 350; Layout.fillHeight: true; spacing: 16
                     Panel {
                         Layout.fillWidth: true; implicitHeight: 292
                         ColumnLayout {
@@ -251,7 +255,7 @@ ApplicationWindow {
         closePolicy: recorder.state === "editing" ? Popup.NoAutoClose : Popup.CloseOnEscape
         onOpened: { player.source=recorder.lastFile;inSlider.value=0;outSlider.value=1 }
         onClosed: { player.stop();player.source="" }
-        MediaPlayer { id: player; videoOutput: videoOutput; audioOutput: AudioOutput { volume: 0.7 } }
+        MediaPlayer { id: player; objectName: "editorPlayer"; videoOutput: videoOutput; audioOutput: AudioOutput { volume: 0.7 } }
         ColumnLayout {
             anchors.fill: parent; spacing: 14
             Rectangle { Layout.fillWidth: true; Layout.fillHeight: true; color: "#090a10"; radius: 10; VideoOutput { id: videoOutput; anchors.fill: parent; fillMode: VideoOutput.PreserveAspectFit } }

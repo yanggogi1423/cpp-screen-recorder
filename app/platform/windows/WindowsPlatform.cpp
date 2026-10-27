@@ -74,6 +74,8 @@ public:
         error_=std::move(error);crop_=region;
         auto interop=get_activation_factory<GraphicsCaptureItem,IGraphicsCaptureItemInterop>();
         const auto handle=source.id.toULongLong();
+        if(source.kind==SourceKind::Window&&(!IsWindow(reinterpret_cast<HWND>(handle))||!IsWindowVisible(reinterpret_cast<HWND>(handle))))
+            throw std::runtime_error("보이는 창을 선택해 주세요. 숨겨지거나 종료된 창은 녹화할 수 없습니다.");
         if(source.kind==SourceKind::Window)check(interop->CreateForWindow(reinterpret_cast<HWND>(handle),guid_of<GraphicsCaptureItem>(),put_abi(item_)));
         else check(interop->CreateForMonitor(reinterpret_cast<HMONITOR>(handle),guid_of<GraphicsCaptureItem>(),put_abi(item_)));
         const auto size=item_.Size();canvas_=region.isEmpty()?QSize(size.Width,size.Height):region.size();

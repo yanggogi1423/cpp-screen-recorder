@@ -22,7 +22,7 @@ signals:
     void finalizing();
 private:
     void run(Platform*,VideoCapture*,Settings,QList<AudioSource>);
-    std::jthread thread_;
+    std::thread thread_;
     std::atomic<bool> stop_{false};
     std::atomic<qint64> frames_{0};
 };
