@@ -4,7 +4,7 @@
 
 Windows 11 build 26200 / MSVC 19.38 / Windows SDK 19041 with project-local C++/WinRT 2.0.240405.15 / Qt 6.8.3 / FFmpeg 9.0.2.
 
-GitHub Actions run [40483484093](https://github.com/yanggogi1423/cpp-screen-recorder/actions/runs/40483484093) passed Windows and macOS build, core tests, QML smoke and deployment. The macOS runner is arm64; this is not physical-device capture validation.
+Final source commit `526b0c3` passed Windows and macOS build, core tests, QML smoke and deployment in [Actions run 40485999100](https://github.com/yanggogi1423/cpp-screen-recorder/actions/runs/40485999100). The macOS runner is arm64; this is not physical-device capture validation.
 
 ## Recorded media
 
