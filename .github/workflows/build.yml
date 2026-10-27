@@ -1,0 +1,39 @@
+name: Build and test
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          modules: 'qtmultimedia'
+          cache: true
+      - name: Windows build, tests and deployment
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/build-windows.ps1 -Deploy
+      - name: macOS build and tests
+        if: runner.os == 'macOS'
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 3
+          ctest --test-dir build --output-on-failure
+          cmake --install build --prefix dist/Luma-macOS
+      - name: Upload development build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Luma-${{ runner.os }}-development
+          path: dist/
+          if-no-files-found: error
