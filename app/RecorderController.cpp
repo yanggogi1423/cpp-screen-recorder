@@ -11,6 +11,17 @@
 #include <QStorageInfo>
 #include <cmath>
 
+namespace {
+void tracePreflight(const QString &stage) {
+    if (!QCoreApplication::arguments().contains("--encoder-test"))
+        return;
+    QDir().mkpath("artifacts");
+    QFile file("artifacts/preflight-trace.log");
+    if (file.open(QIODevice::WriteOnly | QIODevice::Append))
+        file.write((QString::number(luma::clockNs() / 1e9, 'f', 3) + " " + stage + "\n").toUtf8());
+}
+} // namespace
+
 QImage PreviewProvider::requestImage(const QString &, QSize *size, const QSize &requested) {
     QMutexLocker lock(&mutex_);
     if (image_.isNull()) {
@@ -188,38 +199,54 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
     encoderTimeout_.setSingleShot(true);
     encoderTimeout_.setInterval(15000);
     connect(&encoderTimeout_, &QTimer::timeout, this, [this] {
-        encoderDetail_ = "인코더 응답 시간이 초과됐습니다.";
+        tracePreflight("timeout");
+        probeTimedOut_ = true;
         encoderProbe_.kill();
     });
-    connect(&encoderProbe_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-            [this](int code, QProcess::ExitStatus exit) {
-                encoderTimeout_.stop();
-                const auto error =
-                    QString::fromUtf8(encoderProbe_.readAllStandardError()).trimmed();
-                if (probeCancelled_) {
-                    pendingStart_ = false;
-                    encoderStatus_ = "unchecked";
-                    encoderDetail_ = "검사 취소";
-                    setState("idle");
-                    emit encoderChanged();
-                    return;
-                }
-                const bool passed = exit == QProcess::NormalExit && code == 0;
-                encoderStatus_ = passed ? "passed" : "failed";
-                encoderDetail_ = passed            ? "선택한 해상도·FPS의 실제 인코딩 통과"
-                                 : error.isEmpty() ? "인코더를 사용할 수 없습니다. CPU 인코더를 "
-                                                     "선택하거나 드라이버를 확인해 주세요."
-                                                   : error.right(1200);
-                checkedFingerprint_ = passed ? probingFingerprint_ : QString();
-                const bool start = pendingStart_;
+    connect(
+        &encoderProbe_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+        [this](int code, QProcess::ExitStatus exit) {
+            tracePreflight(QString("finished code=%1 cancel=%2").arg(code).arg(probeCancelled_));
+            encoderTimeout_.stop();
+            const auto error = QString::fromUtf8(encoderProbe_.readAllStandardError()).trimmed();
+            if (probeCancelled_) {
                 pendingStart_ = false;
+                encoderStatus_ = "unchecked";
+                encoderDetail_ = "검사 취소";
                 setState("idle");
                 emit encoderChanged();
-                if (passed && start)
-                    beginCountdown();
-                else if (!passed)
-                    showMessage(encoderDetail_);
-            });
+                return;
+            }
+            const bool passed = exit == QProcess::NormalExit && code == 0;
+            encoderStatus_ = passed ? "passed" : "failed";
+            encoderDetail_ = passed           ? "선택한 해상도·FPS의 실제 인코딩 통과"
+                             : probeTimedOut_ ? "15초 안에 검사를 마치지 못했습니다. CPU "
+                                                "인코더나 낮은 해상도로 다시 검사해 주세요."
+                                              : "이 인코더를 사용할 수 없습니다. CPU 인코더를 "
+                                                "선택하거나 그래픽 드라이버를 확인해 주세요.";
+            const bool fixture = QCoreApplication::arguments().contains("--encoder-test") ||
+                                 QCoreApplication::arguments().contains("--workflow-test");
+            const auto logs =
+                fixture
+                    ? QDir::current().absoluteFilePath("artifacts")
+                    : QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+                          .filePath("logs");
+            if (QDir().mkpath(logs)) {
+                QFile log(QDir(logs).filePath("encoder-check.log"));
+                if (log.open(QIODevice::WriteOnly))
+                    log.write((probingFingerprint_ + "\n" + error + "\n").toUtf8());
+            }
+            checkedFingerprint_ = passed ? probingFingerprint_ : QString();
+            const bool start = pendingStart_;
+            pendingStart_ = false;
+            setState("idle");
+            emit encoderChanged();
+            tracePreflight("emitted " + encoderStatus_);
+            if (passed && start)
+                beginCountdown();
+            else if (!passed)
+                showMessage(encoderDetail_);
+        });
     connect(&encoderProbe_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart) {
             encoderTimeout_.stop();
@@ -507,6 +534,7 @@ void RecorderController::saveSettings() {
 }
 void RecorderController::toggleRecording() {
     if (state_ == "checking") {
+        tracePreflight("cancel via record action");
         probeCancelled_ = true;
         pendingStart_ = false;
         encoderProbe_.kill();
@@ -612,6 +640,7 @@ QString RecorderController::encoderFingerprint() const {
         .arg(settings_.fps);
 }
 void RecorderController::checkEncoder() {
+    tracePreflight("requested state=" + state_);
     if (state_ != "idle")
         return;
     try {
@@ -624,6 +653,7 @@ void RecorderController::checkEncoder() {
         return;
     }
     probeCancelled_ = false;
+    probeTimedOut_ = false;
     encoderStatus_ = "checking";
     encoderDetail_ = "선택한 설정으로 실제 인코딩 중…";
     probingFingerprint_ = encoderFingerprint();
@@ -631,6 +661,7 @@ void RecorderController::checkEncoder() {
     emit encoderChanged();
     encoderProbe_.start(luma::RecordingSession::ffmpegPath(),
                         luma::RecordingSession::probeArguments(settings_));
+    tracePreflight("launch " + encoderFingerprint());
     encoderTimeout_.start();
 }
 void RecorderController::prepareRecording() {

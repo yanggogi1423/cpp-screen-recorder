@@ -179,7 +179,7 @@ class RecorderController final : public QObject {
     QTimer encoderTimeout_;
     QString encoderStatus_ = "unchecked", encoderDetail_ = "검사 전", checkedFingerprint_,
             probingFingerprint_;
-    bool pendingStart_ = false, probeCancelled_ = false;
+    bool pendingStart_ = false, probeCancelled_ = false, probeTimedOut_ = false;
     QString diskSpace_ = "확인 중", throughput_ = "—";
     int statsTicks_ = 0;
     qint64 statFrames_ = 0, statTime_ = 0;

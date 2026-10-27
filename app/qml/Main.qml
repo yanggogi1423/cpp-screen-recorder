@@ -8,10 +8,14 @@ import QtMultimedia
 ApplicationWindow {
     id: root
     property bool expanded: recorder.expanded
-    width: Math.min(expanded ? 1160 : 780, Screen.width - 40)
-    height: Math.min(780, Screen.height - 72)
-    minimumWidth: Math.min(expanded ? 1080 : 700, Screen.width - 40)
-    minimumHeight: Math.min(640, Screen.height - 72)
+    property int previewScreenWidth: 0
+    property int previewScreenHeight: 0
+    property int desktopWidth: previewScreenWidth || Screen.width
+    property int desktopHeight: previewScreenHeight || Screen.height
+    width: Math.min(expanded ? 1160 : 780, desktopWidth - 40)
+    height: Math.min(780, desktopHeight - 72)
+    minimumWidth: Math.min(expanded ? 1080 : 700, desktopWidth - 40)
+    minimumHeight: Math.min(640, desktopHeight - 72)
     visible: true
     flags: Qt.platform.os === "windows" ? Qt.Window | Qt.FramelessWindowHint : Qt.Window
     title: "Luma Recorder"
@@ -55,6 +59,11 @@ ApplicationWindow {
             for (var j = 0; j < chosen.length; j++)
                 recorder.selectAudio(chosen[j].id, false);
         } else {
+            if (chosen.length) {
+                for (var k = 0; k < chosen.length; k++)
+                    recorder.setAudioMuted(chosen[k].id, false);
+                return;
+            }
             var all = kindRoutes(mic);
             var target = all.find(function (a) {
                 return mic || a.kind === 2;
@@ -66,8 +75,10 @@ ApplicationWindow {
                     return mic || a.kind === 2;
                 });
             }
-            if (target)
+            if (target) {
                 recorder.selectAudio(target.id, true);
+                recorder.setAudioMuted(target.id, false);
+            }
         }
     }
     function kindAudible(mic) {
@@ -263,6 +274,7 @@ ApplicationWindow {
     }
     MediaPlayer {
         id: testPlayer
+        objectName: "audioCheckPlayer"
         source: recorder.audioSample
         audioOutput: AudioOutput {
             volume: 0.6
@@ -578,10 +590,12 @@ ApplicationWindow {
                     text: "화질"
                 }
                 Select {
+                    objectName: "simpleQuality"
                     Layout.fillWidth: true
                     model: ["1080p", "1440p", "4K", "720p", "직접 설정…"]
                     enabled: root.idle
-                    currentIndex: recorder.settings.width === 1920 ? 0 : recorder.settings.width === 2560 ? 1 : recorder.settings.width === 3840 ? 2 : recorder.settings.width === 1280 ? 3 : 4
+                    currentIndex: recorder.settings.width === 1920 && recorder.settings.height === 1080 ? 0 : recorder.settings.width === 2560 && recorder.settings.height === 1440 ? 1 : recorder.settings.width === 3840 && recorder.settings.height === 2160 ? 2 : recorder.settings.width === 1280 && recorder.settings.height === 720 ? 3 : 4
+                    displayText: currentIndex === 4 ? recorder.settings.width + " × " + recorder.settings.height : currentText
                     onActivated: {
                         var widths = [1920, 2560, 3840, 1280];
                         var heights = [1080, 1440, 2160, 720];
@@ -594,21 +608,29 @@ ApplicationWindow {
                     }
                 }
                 Select {
+                    objectName: "simpleFps"
                     implicitWidth: 105
-                    model: ["30 fps", "60 fps", "120 fps"]
+                    property var values: [30, 60, 120].indexOf(recorder.settings.fps) < 0 ? [30, 60, 120, recorder.settings.fps] : [30, 60, 120]
+                    model: values.map(function (v) {
+                        return v + " fps";
+                    })
                     enabled: root.idle
-                    currentIndex: recorder.settings.fps === 30 ? 0 : recorder.settings.fps === 120 ? 2 : 1
-                    onActivated: recorder.setSetting("fps", [30, 60, 120][currentIndex])
+                    currentIndex: values.indexOf(recorder.settings.fps)
+                    onActivated: recorder.setSetting("fps", values[currentIndex])
                 }
                 Caption {
                     text: "시작"
                 }
                 Select {
+                    objectName: "simpleDelay"
                     implicitWidth: 90
-                    model: ["즉시", "3초 후", "5초 후"]
+                    property var values: [0, 3, 5].indexOf(recorder.settings.delay) < 0 ? [0, 3, 5, recorder.settings.delay] : [0, 3, 5]
+                    model: values.map(function (v) {
+                        return v === 0 ? "즉시" : v + "초 후";
+                    })
                     enabled: root.idle
-                    currentIndex: recorder.settings.delay === 0 ? 0 : recorder.settings.delay === 5 ? 2 : 1
-                    onActivated: recorder.setSetting("delay", [0, 3, 5][currentIndex])
+                    currentIndex: values.indexOf(recorder.settings.delay)
+                    onActivated: recorder.setSetting("delay", values[currentIndex])
                 }
             }
             RowLayout {
@@ -635,6 +657,7 @@ ApplicationWindow {
                     }
                 }
                 ActionButton {
+                    objectName: "samplePlayButton"
                     text: testPlayer.playbackState === MediaPlayer.PlayingState ? "듣기 중지" : "샘플 듣기"
                     implicitHeight: 32
                     font.pixelSize: 11
@@ -920,6 +943,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             sourceData: modelData
                             allowSelection: root.canChoose
+                            allowMix: root.idle || root.activeRecording || recorder.audioTestActive
                         }
                     }
                     Caption {

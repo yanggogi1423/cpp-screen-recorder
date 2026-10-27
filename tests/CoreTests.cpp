@@ -145,6 +145,12 @@ int main(int argc, char **argv) {
                 "video timeline did not remove pause");
         timeline.setPaused(true, base + 35000000);
         require(timeline.elapsed(base + 45000000) == 25000000, "second/open final pause broken");
+        timeline.finish(base + 45000000);
+        require(timeline.elapsed(base + 1000000000) == 25000000 &&
+                    timeline.pausedDuration(base + 1000000000) == 20000000,
+                "stop did not freeze paused timeline");
+        require(timeline.project({QByteArray(480 * 4, 1), base + 50000000}).isEmpty(),
+                "audio retained after stop boundary");
         const auto probe = luma::RecordingSession::probeArguments(s);
         require(probe.contains("lavfi") && probe.contains("null") && probe.contains("libx264"),
                 "encoder check is not an actual encode");

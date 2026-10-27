@@ -11,10 +11,13 @@ class SessionTimeline {
     void reset(qint64 origin) {
         std::lock_guard lock(mutex_);
         origin_ = origin;
+        ended_ = -1;
         pauses_.clear();
     }
     void setPaused(bool paused, qint64 now = clockNs()) {
         std::lock_guard lock(mutex_);
+        if (ended_ >= 0)
+            return;
         const bool current = !pauses_.empty() && pauses_.back().end < 0;
         if (paused == current)
             return;
@@ -29,18 +32,30 @@ class SessionTimeline {
     }
     qint64 elapsed(qint64 now = clockNs()) const {
         std::lock_guard lock(mutex_);
+        if (ended_ >= 0)
+            now = std::min(now, ended_);
         return std::max<qint64>(0, now - origin_ - removedBefore(now));
     }
     qint64 pausedDuration(qint64 now = clockNs()) const {
         std::lock_guard lock(mutex_);
+        if (ended_ >= 0)
+            now = std::min(now, ended_);
         return removedBefore(now);
+    }
+    void finish(qint64 now = clockNs()) {
+        std::lock_guard lock(mutex_);
+        if (ended_ < 0)
+            ended_ = now;
     }
     QList<AudioPacket> project(const AudioPacket &packet) const {
         std::lock_guard lock(mutex_);
         QList<AudioPacket> result;
         const qint64 start = packet.timestampNs;
         const qint64 count = packet.pcm.size() / 4;
-        const qint64 end = start + count * 1000000000 / 48000;
+        const qint64 end = ended_ < 0 ? start + count * 1000000000 / 48000
+                                      : std::min(ended_, start + count * 1000000000 / 48000);
+        if (end <= start)
+            return result;
         auto append = [&](qint64 a, qint64 b) {
             if (b <= a)
                 return;
@@ -85,6 +100,7 @@ class SessionTimeline {
     }
     mutable std::mutex mutex_;
     qint64 origin_ = 0;
+    qint64 ended_ = -1;
     std::vector<Pause> pauses_;
 };
 } // namespace luma

@@ -6,6 +6,7 @@ Rectangle {
     id: route
     required property var sourceData
     property bool allowSelection: true
+    property bool allowMix: true
     property var mix: recorder.mixStates[sourceData.id] || ({
             gain: 1,
             muted: false
@@ -46,7 +47,7 @@ Rectangle {
                 implicitWidth: 68
                 implicitHeight: 28
                 font.pixelSize: 10
-                enabled: route.sourceData.selected
+                enabled: route.sourceData.selected && route.allowMix
                 onClicked: recorder.setAudioMuted(route.sourceData.id, !route.mix.muted)
             }
         }
@@ -56,7 +57,7 @@ Rectangle {
                 from: 0
                 to: 2
                 value: route.mix.gain
-                enabled: route.sourceData.selected
+                enabled: route.sourceData.selected && route.allowMix
                 onMoved: recorder.setAudioGain(route.sourceData.id, value)
             }
             Text {

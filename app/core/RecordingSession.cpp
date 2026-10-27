@@ -79,6 +79,7 @@ QStringList RecordingSession::probeArguments(const Settings &settings) {
     args = args.mid(args.indexOf("-c:v"));
     args.removeLast();
     return QStringList{"-hide_banner",
+                       "-nostdin",
                        "-v",
                        "error",
                        "-f",
@@ -237,6 +238,7 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
                 break;
             }
         }
+        timeline_.finish();
         emit finalizing();
         stopCaptures();
         const auto duration = frames_.load() * 1000000000 / s.fps;

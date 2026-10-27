@@ -14,6 +14,7 @@ class RecordingSession : public QObject {
     void start(Platform *platform, VideoCapture *video, const Settings &settings,
                const QList<AudioSource> &audio);
     void requestStop() {
+        timeline_.finish();
         stop_ = true;
     }
     qint64 frames() const {
