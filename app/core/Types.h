@@ -53,7 +53,7 @@ inline void applyMix(AudioPacket &packet, AudioMix &mix) {
 }
 struct Settings {
     int width = 1920, height = 1080, fps = 60, delaySeconds = 3, quality = 20;
-    QString encoder = "libx264", container = "mkv", outputFolder;
+    QString encoder = "libx264", container = "mp4", outputFolder;
     bool cursor = true;
     void validate() const {
         if (width < 64 || height < 64 || width > 16384 || height > 16384 || width % 2 || height % 2)

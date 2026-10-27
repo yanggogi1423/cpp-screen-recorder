@@ -1,12 +1,12 @@
-# Luma Recorder
+# FARecorder
 
 A modern desktop recorder built with **C++20 + Qt 6 / QML**, with native capture backends for Windows and macOS.
 
-현재 **0.2.0 alpha 개발 중**입니다. 기능을 구현했다는 것과 실제 장비에서 검증했다는 것을 구분합니다. 최종 지원 상태와 테스트 증거는 [기능 점검표](docs/FEATURE_AUDIT.md)에 기록합니다. 아직 정식 릴리즈가 아닙니다.
+현재 **0.3.0 alpha 개발 중**입니다. 기능을 구현했다는 것과 실제 장비에서 검증했다는 것을 구분합니다. 최종 지원 상태와 테스트 증거는 [기능 점검표](docs/FEATURE_AUDIT.md)에 기록합니다. 아직 정식 릴리즈가 아닙니다.
 
 ![간소화 화면](docs/images/main.png)
 
-[확장 화면 보기](docs/images/expanded.png) · [0.2 검증 결과](docs/VALIDATION-0.2.md) · [UI 설계](docs/DESIGN.md)
+[확장 화면](docs/images/expanded.png) · [녹화 중 최적 화면](docs/images/compact.png) · [프로그램 정보](docs/images/about.png) · [0.3 검증 결과](docs/VALIDATION-0.3.md) · [UI 설계](docs/DESIGN.md)
 
 ## 만들고 있는 경험
 
@@ -18,7 +18,10 @@ A modern desktop recorder built with **C++20 + Qt 6 / QML**, with native capture
 - 운영체제의 스피커·통화 마이크 음량과 분리된 녹화용 믹서
 - 녹화 종료 후 재생·시작/종료 구간 자르기
 - 편집 저장 시 **새 파일 저장 / 원본 덮어쓰기 / 취소**를 명시적으로 선택
+- **MP4 기본 저장**, 기본·확장 화면과 파일 메뉴에서 저장 폴더 지정
 - 검정 테마, 간소화/확장 화면 전환, 설정 유지
+- 녹화 시작 시 400×104 최적 화면: 타이머·일시정지/재개·정지·화면 복귀
+- 파일 / 편집 / 도움말 메뉴: 버전·제작자·마지막 업데이트·GitHub 링크 (최적 화면에서는 숨김)
 - Windows 기본 제목 표시줄 제거, 창 이동·최대화·크기 조절
 - 녹화 버튼을 모티브로 생성한 앱 아이콘과 녹화·정지·일시정지 버튼 이미지
 - 녹화 전 5초 오디오 샘플 테스트와 샘플 듣기
@@ -34,16 +37,16 @@ A modern desktop recorder built with **C++20 + Qt 6 / QML**, with native capture
 2. 전체 화면 / 특정 창 / 영역 지정을 고르고 소스를 연결합니다.
 3. 녹음할 앱과 마이크를 선택합니다. Windows의 앱 목록에는 오디오 세션을 만든 프로그램이 표시되므로, 앱에서 소리를 재생한 뒤 새로고침하세요.
 4. **소리 테스트**로 선택한 소스를 5초간 확인하고 **샘플 듣기**로 결과를 확인합니다. 사용자 마이크 선택/권한 허용이 필요하며 녹화 파일을 만들지는 않습니다.
-5. 해상도·FPS·시작 지연을 정합니다. 확장 화면에서 인코더·형식·저장 폴더와 앱별 믹서를 설정할 수 있습니다.
+5. **저장 위치…** 또는 **파일 → 녹화 폴더 지정…**으로 저장 폴더를 고릅니다. 기본은 동영상 폴더의 `FARecorder`이며 MP4로 저장합니다. 해상도·FPS·시작 지연을 정하고, 확장 화면에서 인코더·MKV 형식·앱별 믹서를 설정할 수 있습니다.
 6. 녹화를 시작하면 처음 또는 설정 변경 후 실제 인코딩 검사를 통과한 다음 카운트다운/녹화가 시작됩니다.
-7. 녹화 중에는 선택한 트랙의 음량과 뮤트를 조절할 수 있습니다. 선택한 소스 자체는 녹화 중 바꿀 수 없습니다.
+7. 녹화가 시작되면 메뉴가 없는 **최적 화면**으로 자동 축소됩니다. `↗`로 기존 화면에 돌아와 선택한 트랙의 음량·뮤트를 조절하고, **최적 모드**로 다시 줄일 수 있습니다. 종료하면 이전 화면과 창 크기로 돌아옵니다. 선택한 소스 자체는 녹화 중 바꿀 수 없습니다.
 8. 종료 후 편집 화면에서 재생·자르기를 하고 저장 방식을 선택합니다.
 
 Windows는 **Ctrl+Shift+R**로 시작/종료, **Ctrl+Shift+P**로 일시정지/재개합니다. macOS는 **⌘⇧R / ⌘⇧P**를 사용합니다. 앱이 뒤에 있어도 동작하는 OS 전역 단축키입니다. 다른 앱과 충돌하면 등록 실패를 표시하며, 앱 안의 버튼을 사용할 수 있습니다. 카운트다운과 인코더 검사 중 `Esc`로 취소할 수 있습니다.
 
 ## 오디오 저장과 믹서
 
-각 세션 폴더에는 영상 원본 `video.mkv`, 개별 RF64 `.wav`, 여러 AAC 트랙이 담긴 `recording.mkv` 또는 `.mp4`, 로그와 `session.json`이 저장됩니다. RF64는 일반 WAV의 4 GiB 크기 한계를 피합니다.
+지정한 저장 폴더 아래 `FARecorder_날짜_시간_식별자` 세션 폴더를 만듭니다. 각 세션 폴더에는 영상 원본 `video.mkv`, 개별 RF64 `.wav`, 여러 AAC 트랙이 담긴 `recording.mkv` 또는 `.mp4`, 로그와 `session.json`이 저장됩니다. RF64는 일반 WAV의 4 GiB 크기 한계를 피합니다.
 
 오디오가 2개 이상이면 일반 플레이어용 전체 믹스 트랙을 기본 트랙으로 추가하고, 독립 트랙도 함께 보관합니다. 멀티트랙을 지원하는 편집기에서 개별 트랙을 조절할 수 있습니다.
 
@@ -61,7 +64,7 @@ Windows는 **Ctrl+Shift+R**로 시작/종료, **Ctrl+Shift+P**로 일시정지/�
 ```powershell
 ./tools/setup-windows.ps1
 ./tools/build-windows.ps1 -Deploy
-./dist/Luma-Windows-x64/bin/Luma.exe
+./dist/FARecorder-Windows-x64/bin/FARecorder.exe
 ```
 
 Qt와 빌드 의존성은 프로젝트 `.deps` / `.venv`에 설치합니다. FFmpeg는 프로젝트 `tools/ffmpeg/bin`에 설치하며 시스템 PATH나 권한 설정은 변경하지 않습니다. `QT_ROOT_DIR`로 기존 Qt 설치를 지정할 수도 있습니다.
@@ -70,7 +73,7 @@ Qt와 빌드 의존성은 프로젝트 `.deps` / `.venv`에 설치합니다. FFm
 
 ```powershell
 $env:PATH="$PWD/.deps/Qt/6.8.3/msvc2022_64/bin;$env:PATH"
-./build/Luma.exe
+./build/FARecorder.exe
 ```
 
 ### macOS
@@ -81,7 +84,7 @@ Qt 6.8.3의 `qtmultimedia` 모듈을 설치하고 Qt 경로를 `CMAKE_PREFIX_PAT
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/Qt/6.8.3/macos
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
-cmake --install build --prefix dist/Luma-macOS
+cmake --install build --prefix dist/FARecorder-macOS
 ```
 
 macOS 빌드/기본 테스트/배포는 CI에서 통과했습니다. 물리 Mac에서 권한 허용, 실제 녹화, 마이크·앱별 소리, 편집을 검증하기 전에는 macOS 녹화 기능의 동작을 보장하지 않습니다. 개발 빌드는 서명·공증되지 않았습니다.
@@ -95,6 +98,8 @@ macOS 빌드/기본 테스트/배포는 CI에서 통과했습니다. 물리 Mac�
 # 약한 테스트 톤 두 개가 잠깐 재생됩니다. 다른 앱의 화면이나 마이크를 녹음하지 않습니다.
 ./tools/test-windows-workflow.ps1
 ./tools/test-windows-workflow.ps1 -StopPaused
+# 정상 workflow 결과를 남긴 뒤 실행합니다. 덮어쓰기는 테스트 복사본에만 수행합니다.
+./tools/test-windows-editor.ps1
 ```
 
 테스트 산출물은 `artifacts/`에만 저장되며 Git에 포함되지 않습니다. 자동 UI 테스트는 네이티브 캡처/청감/성능 검증을 대신하지 않습니다.
@@ -104,3 +109,9 @@ macOS 빌드/기본 테스트/배포는 CI에서 통과했습니다. 물리 Mac�
 현재 CPU 메모리를 거쳐 인코딩하므로 높은 해상도·FPS를 설정할 수 있어도 실제 처리 성능은 하드웨어에 따라 달라집니다. GPU 인코더는 호환 드라이버와 하드웨어가 필요합니다. HDR, 게임 후킹, 예약 종료, 웹캠/PIP, 주석, 노이즈 억제, 자동 업데이트는 아직 없습니다. 브라우저 탭별 소리나 한 프로세스 안의 통화 참여자별 소리 분리는 지원하지 않습니다.
 
 현재 버전은 보강·디버깅·UI 폴리싱을 거친 개발 프리뷰입니다. 물리 Mac 녹화와 장시간·고부하 인수 시험 후 정식 릴리즈를 진행합니다. 의존성 고지와 배포 정책은 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 확인하세요.
+
+## 제품 정보
+
+프로그램 이름은 **FARecorder**, 제작자 표기는 GitHub 저장소 소유자 **yanggogi1423**입니다. 도움말에 현재 버전과 마지막 코드 업데이트 날짜(2026-10-27), [저장소](https://github.com/yanggogi1423/cpp-screen-recorder) 링크를 표시합니다. 업데이트 날짜는 마지막 확인 시각이나 자동 업데이트 확인 결과가 아닙니다.
+
+이전 Luma 설정은 처음 실행할 때 저장 폴더·해상도·FPS·화면 모드를 가져옵니다. 새 이름에서는 MP4를 기본으로 시작하며, 이후 확장 화면에서 직접 선택한 형식은 유지합니다. 내부 C++ namespace / QML URI `Luma`는 호환성을 위해 유지합니다.

@@ -8,17 +8,20 @@ import QtMultimedia
 ApplicationWindow {
     id: root
     property bool expanded: recorder.expanded
+    property bool optimized: recorder.optimized
+    property rect normalBounds: Qt.rect(0, 0, 780, 780)
+    property bool restoreMaximized: false
     property int previewScreenWidth: 0
     property int previewScreenHeight: 0
     property int desktopWidth: previewScreenWidth || Screen.width
     property int desktopHeight: previewScreenHeight || Screen.height
     width: Math.min(expanded ? 1160 : 780, desktopWidth - 40)
     height: Math.min(780, desktopHeight - 72)
-    minimumWidth: Math.min(expanded ? 1080 : 700, desktopWidth - 40)
-    minimumHeight: Math.min(640, desktopHeight - 72)
+    minimumWidth: optimized ? 400 : Math.min(expanded ? 1080 : 700, desktopWidth - 40)
+    minimumHeight: optimized ? 104 : Math.min(640, desktopHeight - 72)
     visible: true
     flags: Qt.platform.os === "windows" ? Qt.Window | Qt.FramelessWindowHint : Qt.Window
-    title: "Luma Recorder"
+    title: "FARecorder"
     color: "#141414"
     font.family: Qt.platform.os === "osx" ? "Apple SD Gothic Neo" : "Malgun Gothic"
     palette.window: "#1c1c1c"
@@ -35,6 +38,32 @@ ApplicationWindow {
     property bool closeAfterSave: false
     property int captureTestTick: -1
     property int mode: 0
+    onExpandedChanged: {
+        if (!optimized)
+            width = Math.min(expanded ? 1160 : 780, desktopWidth - 40);
+    }
+    onOptimizedChanged: {
+        if (optimized) {
+            restoreMaximized = visibility === Window.Maximized;
+            if (restoreMaximized)
+                showNormal();
+            normalBounds = Qt.rect(x, y, width, height);
+            // Let the minimum-size bindings update before shrinking the window.
+            Qt.callLater(function () {
+                if (root.optimized) {
+                    root.width = 400;
+                    root.height = 104;
+                }
+            });
+        } else {
+            width = Math.min(normalBounds.width, desktopWidth - 40);
+            height = Math.min(normalBounds.height, desktopHeight - 72);
+            x = normalBounds.x;
+            y = normalBounds.y;
+            if (restoreMaximized)
+                showMaximized();
+        }
+    }
     property var selectedRoutes: recorder.audio.filter(function (a) {
         return a.selected;
     })
@@ -227,6 +256,7 @@ ApplicationWindow {
     onClosing: function (close) {
         if (recorder.state !== "idle") {
             close.accepted = false;
+            recorder.setOptimized(false);
             closeDialog.open();
         }
     }
@@ -264,6 +294,7 @@ ApplicationWindow {
     FolderDialog {
         id: folderDialog
         title: "녹화 저장 폴더"
+        currentFolder: recorder.outputFolder
         onAccepted: recorder.setOutputFolder(selectedFolder)
     }
     FileDialog {
@@ -283,6 +314,8 @@ ApplicationWindow {
 
     Rectangle {
         id: titlebar
+        objectName: "titlebar"
+        visible: !root.optimized
         anchors.top: parent.top
         width: parent.width
         height: 48
@@ -305,15 +338,10 @@ ApplicationWindow {
                 mipmap: true
             }
             Text {
-                text: "Luma"
+                text: "FARecorder"
                 color: "#ededed"
                 font.pixelSize: 14
                 font.weight: Font.DemiBold
-            }
-            Caption {
-                text: "RECORDER"
-                font.pixelSize: 9
-                font.letterSpacing: 1.5
             }
             Item {
                 Layout.fillWidth: true
@@ -323,6 +351,13 @@ ApplicationWindow {
                     onPressed: root.startSystemMove()
                     onDoubleClicked: root.visibility === Window.Maximized ? root.showNormal() : root.showMaximized()
                 }
+            }
+            ActionButton {
+                visible: root.activeRecording
+                text: "최적 모드"
+                implicitHeight: 29
+                font.pixelSize: 11
+                onClicked: recorder.setOptimized(true)
             }
             ActionButton {
                 objectName: "modeButton"
@@ -353,9 +388,191 @@ ApplicationWindow {
             }
         }
     }
+    MenuBar {
+        id: mainMenu
+        objectName: "mainMenu"
+        anchors.top: titlebar.bottom
+        width: parent.width
+        visible: !root.optimized
+        background: Rectangle {
+            color: "#191919"
+            Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 1
+                color: "#303030"
+            }
+        }
+        Menu {
+            title: "파일"
+            Action {
+                text: "녹화 폴더 지정…"
+                enabled: root.idle
+                onTriggered: folderDialog.open()
+            }
+            Action {
+                text: "녹화 폴더 열기"
+                onTriggered: recorder.openOutputFolder()
+            }
+            MenuSeparator {}
+            Action {
+                text: "종료"
+                onTriggered: root.close()
+            }
+        }
+        Menu {
+            title: "편집"
+            Action {
+                text: "영상 열고 자르기…"
+                enabled: root.idle
+                onTriggered: recordingDialog.open()
+            }
+            Action {
+                text: "최근 영상 편집"
+                enabled: root.idle && recorder.lastFile.toString().length > 0
+                onTriggered: editor.open()
+            }
+        }
+        Menu {
+            title: "도움말"
+            Action {
+                objectName: "aboutAction"
+                text: "FARecorder 정보"
+                onTriggered: aboutDialog.open()
+            }
+            Action {
+                text: "GitHub 저장소"
+                onTriggered: Qt.openUrlExternally(recorder.appInfo.repository)
+            }
+            Action {
+                text: "문제 제보"
+                onTriggered: Qt.openUrlExternally(recorder.appInfo.repository + "/issues")
+            }
+        }
+    }
+    Rectangle {
+        objectName: "compactContent"
+        visible: root.optimized
+        anchors.fill: parent
+        color: "#191919"
+        border.color: "#3b3b3b"
+        radius: Qt.platform.os === "windows" ? 10 : 0
+        // Moving pixels in the self-capture fixture verify fresh WGC frames.
+        Rectangle {
+            visible: root.captureTestTick >= 0
+            x: 4 + (root.captureTestTick * 3) % 100
+            y: parent.height - 5
+            width: 4
+            height: 4
+            color: root.captureTestTick % 2 ? "#e46660" : "#a1b9ae"
+        }
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 16
+            spacing: 12
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 5
+                RowLayout {
+                    Rectangle {
+                        width: 6
+                        height: 6
+                        radius: 3
+                        color: recorder.state === "paused" ? "#d1b57c" : "#ef5751"
+                    }
+                    Caption {
+                        text: "FARecorder · " + (recorder.state === "paused" ? "일시정지" : "녹화 중")
+                        font.pixelSize: 10
+                    }
+                }
+                Text {
+                    text: recorder.elapsed
+                    color: "#f0f0f0"
+                    font.family: "Consolas"
+                    font.pixelSize: 27
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onPressed: root.startSystemMove()
+                }
+            }
+            TransportButton {
+                objectName: "compactPause"
+                symbol: recorder.state === "paused" ? "resume" : "pause"
+                text: recorder.state === "paused" ? "녹화 재개" : "일시정지"
+                onClicked: recorder.togglePause()
+            }
+            TransportButton {
+                objectName: "compactStop"
+                symbol: "stop"
+                text: "녹화 종료 및 저장"
+                onClicked: recorder.toggleRecording()
+            }
+            ToolButton {
+                objectName: "compactRestore"
+                text: "↗"
+                font.pixelSize: 21
+                implicitWidth: 30
+                Accessible.name: "원래 화면으로 돌아가기"
+                ToolTip.visible: hovered
+                ToolTip.text: "원래 화면 · 녹화용 믹서"
+                onClicked: recorder.setOptimized(false)
+            }
+        }
+    }
+    Dialog {
+        id: aboutDialog
+        objectName: "aboutDialog"
+        anchors.centerIn: parent
+        width: Math.min(420, root.width - 40)
+        title: "FARecorder 정보"
+        modal: true
+        footer: DialogButtonBox {
+            Button {
+                text: "닫기"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+        }
+        background: Rectangle {
+            color: "#202020"
+            radius: 12
+            border.color: "#454545"
+        }
+        ColumnLayout {
+            width: parent.width
+            spacing: 16
+            Image {
+                source: "qrc:/assets/app-icon.png"
+                Layout.preferredWidth: 64
+                Layout.preferredHeight: 64
+                mipmap: true
+            }
+            Heading {
+                text: recorder.appInfo.name
+            }
+            Caption {
+                text: "버전  " + recorder.appInfo.version + "\n제작자  " + recorder.appInfo.author + "\n마지막 업데이트  " + recorder.appInfo.updated
+                lineHeight: 1.7
+                color: "#c5c5c5"
+            }
+            Caption {
+                Layout.fillWidth: true
+                text: "C++ · Qt · Windows / macOS\n녹화용 음량 조절은 운영체제 음량과 별도로 적용됩니다."
+                wrapMode: Text.Wrap
+                lineHeight: 1.5
+            }
+            ActionButton {
+                text: "GitHub 저장소 열기"
+                onClicked: Qt.openUrlExternally(recorder.appInfo.repository)
+            }
+        }
+    }
     RowLayout {
+        objectName: "normalContent"
+        visible: !root.optimized
         anchors {
-            top: titlebar.bottom
+            top: mainMenu.bottom
             left: parent.left
             right: parent.right
             bottom: parent.bottom
@@ -732,11 +949,23 @@ ApplicationWindow {
             RowLayout {
                 Layout.fillWidth: true
                 Caption {
-                    text: recorder.diskSpace
-                    font.pixelSize: 10
-                }
-                Item {
                     Layout.fillWidth: true
+                    text: recorder.settings.output
+                    elide: Text.ElideLeft
+                    font.pixelSize: 10
+                    ToolTip.visible: folderHover.hovered
+                    ToolTip.text: recorder.settings.output + "\n" + recorder.diskSpace
+                    HoverHandler {
+                        id: folderHover
+                    }
+                }
+                ActionButton {
+                    objectName: "chooseFolderButton"
+                    text: "저장 위치…"
+                    implicitHeight: 28
+                    font.pixelSize: 10
+                    enabled: root.idle
+                    onClicked: folderDialog.open()
                 }
                 ActionButton {
                     text: "녹화 폴더"
@@ -883,8 +1112,8 @@ ApplicationWindow {
                             }
                             Select {
                                 Layout.fillWidth: true
-                                model: ["MKV", "MP4"]
-                                currentIndex: recorder.settings.container === "mp4" ? 1 : 0
+                                model: ["MP4", "MKV"]
+                                currentIndex: recorder.settings.container === "mkv" ? 1 : 0
                                 enabled: root.idle
                                 onActivated: recorder.setSetting("container", currentText.toLowerCase())
                             }
@@ -996,7 +1225,7 @@ ApplicationWindow {
         }
     }
     Repeater {
-        model: Qt.platform.os === "windows" ? [Qt.LeftEdge, Qt.RightEdge, Qt.TopEdge, Qt.BottomEdge] : []
+        model: Qt.platform.os === "windows" && !root.optimized && root.visibility !== Window.Maximized ? [Qt.LeftEdge, Qt.RightEdge, Qt.TopEdge, Qt.BottomEdge] : []
         delegate: MouseArea {
             required property int modelData
             x: modelData === Qt.RightEdge ? root.width - 5 : 0

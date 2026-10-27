@@ -1,4 +1,5 @@
 #include "RecorderController.h"
+#include "AppInfo.h"
 #include <QDesktopServices>
 #include <QDir>
 #include <QGuiApplication>
@@ -44,22 +45,31 @@ void PreviewProvider::setFrame(QImage image) {
 RecorderController::RecorderController(PreviewProvider *preview, QObject *parent)
     : QObject(parent), platform_(luma::createPlatform()), preview_(preview) {
     QSettings store;
+    // Carry forward existing capture preferences after the product rename. The new
+    // product starts with MP4; a later explicit container selection is preserved.
+    if (!store.value("migration/FARecorder", false).toBool()) {
+        QSettings legacy(QSettings::defaultFormat(), QSettings::UserScope, "Luma", "Luma Recorder");
+        for (const auto &key : legacy.allKeys())
+            if (key != "container" && !store.contains(key))
+                store.setValue(key, legacy.value(key));
+        store.setValue("migration/FARecorder", true);
+    }
     expanded_ = store.value("expanded", false).toBool();
     settings_.width = store.value("width", 1920).toInt();
     settings_.height = store.value("height", 1080).toInt();
     settings_.fps = store.value("fps", 60).toInt();
     settings_.delaySeconds = store.value("delay", 3).toInt();
     settings_.encoder = store.value("encoder", "libx264").toString();
-    settings_.container = store.value("container", "mkv").toString();
+    settings_.container = store.value("container", "mp4").toString();
     settings_.cursor = store.value("cursor", true).toBool();
     settings_.outputFolder =
         store
             .value("output", QDir(QStandardPaths::writableLocation(QStandardPaths::MoviesLocation))
-                                 .filePath("Luma"))
+                                 .filePath("FARecorder"))
             .toString();
     previewTimer_.setInterval(150);
     connect(&previewTimer_, &QTimer::timeout, this, [this] {
-        if (video_) {
+        if (video_ && !optimized_) {
             auto image = video_->latestFrame();
             if (!image.isNull()) {
                 preview_->setFrame(
@@ -100,8 +110,10 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
         } else
             emit stateChanged();
     });
-    connect(&session_, &luma::RecordingSession::started, this,
-            [this](QString) { setState("recording"); });
+    connect(&session_, &luma::RecordingSession::started, this, [this](QString) {
+        setState("recording");
+        setOptimized(true);
+    });
     connect(&session_, &luma::RecordingSession::finalizing, this, [this] { setState("saving"); });
     connect(&session_, &luma::RecordingSession::finished, this,
             [this](QString file, QString warning) {
@@ -275,6 +287,8 @@ RecorderController::~RecorderController() {
 }
 void RecorderController::setState(QString value) {
     state_ = std::move(value);
+    if (state_ != "recording" && state_ != "paused")
+        setOptimized(false);
     emit stateChanged();
 }
 void RecorderController::showMessage(QString value) {
@@ -584,6 +598,20 @@ void RecorderController::setExpanded(bool value) {
     QSettings().setValue("expanded", value);
     emit modeChanged();
 }
+void RecorderController::setOptimized(bool value) {
+    value = value && (state_ == "recording" || state_ == "paused");
+    if (optimized_ == value)
+        return;
+    optimized_ = value;
+    emit optimizedChanged();
+}
+QVariantMap RecorderController::appInfo() const {
+    return {{"name", appinfo::name},
+            {"version", appinfo::version},
+            {"author", appinfo::author},
+            {"updated", appinfo::updated},
+            {"repository", appinfo::repository}};
+}
 int RecorderController::audioTestProgress() const {
     return !audioCheck_.active() || !audioTestTimer_.isValid()
                ? 0
@@ -716,8 +744,9 @@ void RecorderController::startNow() {
     }
 }
 void RecorderController::openOutputFolder() {
-    QDesktopServices::openUrl(QUrl::fromLocalFile(
-        lastFile_.isEmpty() ? settings_.outputFolder : QFileInfo(lastFile_).absolutePath()));
+    if (!QDir().mkpath(settings_.outputFolder) ||
+        !QDesktopServices::openUrl(QUrl::fromLocalFile(settings_.outputFolder)))
+        showMessage("녹화 폴더를 열 수 없습니다. 저장 위치를 확인해 주세요.");
 }
 void RecorderController::openRecording(QUrl file) {
     if (state_ != "idle" || !file.isLocalFile() || !QFileInfo::exists(file.toLocalFile()))
@@ -736,7 +765,7 @@ void RecorderController::exportTrim(double start, double end, bool overwrite) {
     }
     const QFileInfo original(lastFile_);
     const auto token = QUuid::createUuid().toString(QUuid::Id128).left(8);
-    trimTemp_ = original.dir().filePath(".luma-edit-" + token + "." + original.suffix());
+    trimTemp_ = original.dir().filePath(".farecorder-edit-" + token + "." + original.suffix());
     trimTarget_ = overwrite ? lastFile_
                             : original.dir().filePath(original.completeBaseName() + "_trimmed_" +
                                                       token + "." + original.suffix());

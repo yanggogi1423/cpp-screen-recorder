@@ -1,4 +1,4 @@
-# Luma architecture
+# FARecorder architecture
 
 ## Language and boundaries
 
@@ -49,3 +49,9 @@ macOS code must compile in CI and pass physical-Mac permission, capture, timesta
 - [Microsoft process audio capture sample and OS floor](https://learn.microsoft.com/en-us/samples/microsoft/windows-classic-samples/applicationloopbackaudio-sample/)
 - [Apple ScreenCaptureKit sample](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos)
 - [FFmpeg download providers](https://ffmpeg.org/download.html)
+
+## Product shell (0.3)
+
+Public application/executable/bundle names are FARecorder. Internal library namespaces and the QML URI remain `luma` / `Luma`. AppInfo.h is the displayed release metadata. QSettings uses FARecorder/FARecorder and migrates the former Luma/Luma Recorder preferences once, leaving the former data in place and starting the renamed product in MP4. Fixture profiles explicitly use the isolated IniFormat for migration as well.
+
+Compact mode is controller state, allowed only while recording/paused. It never starts a new session or changes capture/mixer settings. The QML window preserves normal geometry and maximization, updates minimum dimensions before shrinking, hides the normal header/menu/content and restores before save/error/editor. Preview image copying stops while compact; capture, encoding, meters and elapsed timing continue.

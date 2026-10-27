@@ -119,10 +119,10 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
         if (ffmpeg.isEmpty())
             throw std::runtime_error(
                 "FFmpeg가 없습니다. tools/setup-ffmpeg.ps1을 먼저 실행해 주세요.");
-        folder =
-            QDir(s.outputFolder)
-                .filePath("Luma_" + QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss") +
-                          "_" + QUuid::createUuid().toString(QUuid::Id128).left(4));
+        folder = QDir(s.outputFolder)
+                     .filePath("FARecorder_" +
+                               QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss") + "_" +
+                               QUuid::createUuid().toString(QUuid::Id128).left(4));
         if (!QDir().mkpath(folder))
             throw std::runtime_error("녹화 폴더를 만들지 못했습니다.");
         auto first = video->latestFrame();

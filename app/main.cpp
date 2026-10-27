@@ -1,4 +1,5 @@
 #include "RecorderController.h"
+#include "AppInfo.h"
 #include <QAudioFormat>
 #include <QAudioSink>
 #include <QBuffer>
@@ -31,9 +32,10 @@ int main(int argc, char **argv) {
     winrt::init_apartment(winrt::apartment_type::single_threaded);
 #endif
     QGuiApplication app(argc, argv);
-    app.setOrganizationName("Luma");
-    app.setApplicationName("Luma Recorder");
-    app.setApplicationVersion("0.2.0-alpha.1");
+    app.setOrganizationName(appinfo::name);
+    app.setApplicationName(appinfo::name);
+    app.setApplicationDisplayName(appinfo::name);
+    app.setApplicationVersion(appinfo::version);
     app.setWindowIcon(QIcon("qrc:/assets/app-icon.png"));
 #ifdef Q_OS_WIN
     // The offscreen Qt test platform does not enumerate the Windows font store.
@@ -42,16 +44,46 @@ int main(int argc, char **argv) {
 #endif
     QQuickStyle::setStyle("Basic");
     const auto arguments = app.arguments();
-    const bool testing = arguments.contains("--ui-smoke") || arguments.contains("--capture-test") ||
-                         arguments.contains("--edit-test") ||
-                         arguments.contains("--workflow-test") ||
-                         arguments.contains("--encoder-test");
+    const bool testing =
+        arguments.contains("--ui-smoke") || arguments.contains("--capture-test") ||
+        arguments.contains("--edit-test") || arguments.contains("--workflow-test") ||
+        arguments.contains("--encoder-test") || arguments.contains("--settings-test");
     if (testing) {
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(
             QSettings::IniFormat, QSettings::UserScope,
             QDir::current().absoluteFilePath("artifacts/test-settings/" +
                                              QUuid::createUuid().toString(QUuid::Id128)));
+    }
+    if (arguments.contains("--settings-test")) {
+        const auto oldFolder = QDir::current().absoluteFilePath("artifacts/이전 저장 위치");
+        const auto newFolder = QDir::current().absoluteFilePath("artifacts/새 저장 위치");
+        QSettings legacy(QSettings::IniFormat, QSettings::UserScope, "Luma", "Luma Recorder");
+        legacy.setValue("container", "mkv");
+        legacy.setValue("output", oldFolder);
+        legacy.setValue("fps", 55);
+        legacy.setValue("expanded", true);
+        legacy.sync();
+        {
+            PreviewProvider preview;
+            RecorderController controller(&preview);
+            if (controller.settings().value("container") != "mp4" ||
+                controller.outputFolder().toLocalFile() != oldFolder ||
+                controller.settings().value("fps").toInt() != 55 || !controller.expanded())
+                return 19;
+            controller.setOutputFolder(QUrl::fromLocalFile(newFolder));
+            controller.setSetting("container", "mkv");
+            controller.setExpanded(false);
+        }
+        {
+            PreviewProvider preview;
+            RecorderController controller(&preview);
+            if (controller.settings().value("container") != "mkv" ||
+                controller.outputFolder().toLocalFile() != newFolder || controller.expanded() ||
+                legacy.value("output") != oldFolder)
+                return 20;
+        }
+        return 0;
     }
     if (arguments.contains("--tone")) {
         const int index = arguments.indexOf("--tone");
@@ -209,12 +241,43 @@ int main(int argc, char **argv) {
                     *pauseObserved = true;
                 if (controller.state() == "recording" && !*recordingStarted) {
                     *recordingStarted = true;
+                    QTimer::singleShot(450, &app, [&, fail] {
+                        auto *root = engine.rootObjects().first();
+                        auto *window = qobject_cast<QQuickWindow *>(root);
+                        auto *menu = root->findChild<QObject *>("mainMenu");
+                        auto *content = root->findChild<QObject *>("normalContent");
+                        if (!controller.optimized() || window->width() != 400 ||
+                            window->height() != 104 || !menu ||
+                            menu->property("visible").toBool() || !content ||
+                            content->property("visible").toBool()) {
+                            fail(QString("Compact view: optimized=%1 size=%2x%3 menu=%4 content=%5")
+                                     .arg(controller.optimized())
+                                     .arg(window->width())
+                                     .arg(window->height())
+                                     .arg(menu && menu->property("visible").toBool())
+                                     .arg(content && content->property("visible").toBool()));
+                            return;
+                        }
+                        window->grabWindow().save("artifacts/ui-compact.png");
+                        const auto settings = controller.settings();
+                        QMetaObject::invokeMethod(root->findChild<QObject *>("compactRestore"),
+                                                  "clicked");
+                        controller.setExpanded(true);
+                        if (controller.optimized() || !menu->property("visible").toBool() ||
+                            controller.settings() != settings) {
+                            fail("Restoring the mixer changed recording settings or menu state");
+                            return;
+                        }
+                        controller.setOptimized(true);
+                    });
                     QTimer::singleShot(1800, &app, [&controller, tones] {
                         controller.setAudioGain("app:" + QString::number((*tones)[0].processId()),
                                                 0.5);
                     });
-                    QTimer::singleShot(2000, &app, [uiThread] {
-                        PostThreadMessage(uiThread, WM_HOTKEY, GlobalHotkeys::PauseId, 0);
+                    QTimer::singleShot(2000, &app, [&] {
+                        QMetaObject::invokeMethod(
+                            engine.rootObjects().first()->findChild<QObject *>("compactPause"),
+                            "clicked");
                     });
                     if (!arguments.contains("--stop-paused"))
                         QTimer::singleShot(3000, &app, [uiThread] {
@@ -229,16 +292,26 @@ int main(int argc, char **argv) {
                                                  false);
                     });
                     QTimer::singleShot(
-                        arguments.contains("--stop-paused") ? 2800 : 6000, &app, [uiThread] {
-                            PostThreadMessage(uiThread, WM_HOTKEY, GlobalHotkeys::RecordId, 0);
+                        arguments.contains("--stop-paused") ? 2800 : 6000, &app, [&] {
+                            QMetaObject::invokeMethod(
+                                engine.rootObjects().first()->findChild<QObject *>("compactStop"),
+                                "clicked");
                         });
                 }
             });
         QObject::connect(
-            &controller, &RecorderController::lastFileChanged, &app, [&, tones, pauseObserved] {
+            &controller, &RecorderController::lastFileChanged, &app,
+            [&, tones, pauseObserved, fail] {
                 const auto file = controller.lastFile().toLocalFile();
                 if (file.isEmpty())
                     return;
+                auto *menu = engine.rootObjects().first()->findChild<QObject *>("mainMenu");
+                if (controller.optimized() || !controller.expanded() || !menu ||
+                    !menu->property("visible").toBool() || !file.endsWith(".mp4") ||
+                    !file.startsWith(controller.outputFolder().toLocalFile() + "/")) {
+                    fail("Final MP4 folder or restored expanded mode/menu is incorrect");
+                    return;
+                }
                 QFile out("artifacts/workflow-result.json");
                 out.open(QIODevice::WriteOnly);
                 out.write(
@@ -246,6 +319,8 @@ int main(int argc, char **argv) {
                         QJsonObject{{"file", file},
                                     {"warning", QString()},
                                     {"pauseObserved", *pauseObserved},
+                                    {"compactModeVerified", true},
+                                    {"restoredExpandedMode", true},
                                     {"encoderPassed", controller.encoderStatus() == "passed"},
                                     {"hotkeysRegistered", controller.globalHotkeysAvailable()}})
                         .toJson());
@@ -265,15 +340,17 @@ int main(int argc, char **argv) {
                 fail("Windows native caption was not removed");
                 return;
             }
-            luma::Source source{QString::number(quintptr(window->winId())), "Luma workflow fixture",
-                                luma::SourceKind::Window, QRect(0, 0, 780, 780),
-                                quint32(QCoreApplication::applicationPid())};
+            luma::Source source{QString::number(quintptr(window->winId())),
+                                "FARecorder workflow fixture", luma::SourceKind::Window,
+                                QRect(0, 0, 780, 780), quint32(QCoreApplication::applicationPid())};
             QList<luma::AudioSource> audio{
                 {QString::number((*tones)[0].processId()), "Tone440", "test",
                  luma::AudioKind::Application, quint32((*tones)[0].processId())},
                 {QString::number((*tones)[1].processId()), "Tone880", "test",
                  luma::AudioKind::Application, quint32((*tones)[1].processId())}};
             controller.configureWorkflowTest(source, audio);
+            controller.setOutputFolder(
+                QUrl::fromLocalFile(QDir::current().absoluteFilePath("artifacts/selected-output")));
             const auto fingerprint = controller.settings();
             controller.setExpanded(true);
             controller.setExpanded(false);
@@ -460,6 +537,17 @@ int main(int argc, char **argv) {
         engine.rootObjects().first()->setProperty("previewScreenWidth", 1600);
         engine.rootObjects().first()->setProperty("previewScreenHeight", 1000);
         QTimer::singleShot(1000, &app, [&] {
+            auto *root = engine.rootObjects().first();
+            auto *menu = root->findChild<QObject *>("mainMenu");
+            auto *folderButton = root->findChild<QObject *>("chooseFolderButton");
+            if (controller.settings().value("container") != "mp4" ||
+                controller.appInfo().value("name") != "FARecorder" ||
+                controller.appInfo().value("version") != QCoreApplication::applicationVersion() ||
+                !menu || !menu->property("visible").toBool() || !folderButton ||
+                !folderButton->property("visible").toBool()) {
+                app.exit(17);
+                return;
+            }
             auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
             const auto image = window->grabWindow();
             if (!image.isNull()) {
@@ -484,7 +572,17 @@ int main(int argc, char **argv) {
                     return;
                 }
             }
-            app.exit(0);
+            auto *about = root->findChild<QObject *>("aboutDialog");
+            auto *aboutAction = root->findChild<QObject *>("aboutAction");
+            QMetaObject::invokeMethod(aboutAction, "trigger");
+            QTimer::singleShot(200, &app, [&, about, window] {
+                if (!about || !about->property("opened").toBool()) {
+                    app.exit(18);
+                    return;
+                }
+                window->grabWindow().save("artifacts/ui-about.png");
+                app.exit(0);
+            });
         });
     }
     return app.exec();

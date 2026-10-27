@@ -31,6 +31,7 @@ class RecorderController final : public QObject {
     Q_PROPERTY(QVariantMap audioLevels READ audioLevels NOTIFY tick)
     Q_PROPERTY(QVariantMap mixStates READ mixStates NOTIFY mixerChanged)
     Q_PROPERTY(QVariantMap settings READ settings NOTIFY settingsChanged)
+    Q_PROPERTY(QUrl outputFolder READ outputFolder NOTIFY settingsChanged)
     Q_PROPERTY(QString state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
     Q_PROPERTY(QString sourceName READ sourceName NOTIFY sourceChanged)
@@ -51,6 +52,8 @@ class RecorderController final : public QObject {
     Q_PROPERTY(bool globalHotkeysAvailable READ globalHotkeysAvailable CONSTANT)
     Q_PROPERTY(QString diskSpace READ diskSpace NOTIFY tick)
     Q_PROPERTY(bool expanded READ expanded NOTIFY modeChanged)
+    Q_PROPERTY(bool optimized READ optimized NOTIFY optimizedChanged)
+    Q_PROPERTY(QVariantMap appInfo READ appInfo CONSTANT)
   public:
     explicit RecorderController(PreviewProvider *, QObject *parent = nullptr);
     ~RecorderController() override;
@@ -60,6 +63,9 @@ class RecorderController final : public QObject {
     QVariantMap audioLevels() const;
     QVariantMap mixStates() const;
     QVariantMap settings() const;
+    QUrl outputFolder() const {
+        return QUrl::fromLocalFile(settings_.outputFolder);
+    }
     QString state() const {
         return state_;
     }
@@ -115,6 +121,11 @@ class RecorderController final : public QObject {
         return expanded_;
     }
     Q_INVOKABLE void setExpanded(bool value);
+    bool optimized() const {
+        return optimized_;
+    }
+    QVariantMap appInfo() const;
+    Q_INVOKABLE void setOptimized(bool value);
     Q_PROPERTY(QString throughput READ throughput NOTIFY tick)
     QString throughput() const {
         return throughput_;
@@ -155,6 +166,7 @@ class RecorderController final : public QObject {
     void encoderChanged();
     void audioTestChanged();
     void modeChanged();
+    void optimizedChanged();
     void mixerChanged();
 
   private:
@@ -184,6 +196,7 @@ class RecorderController final : public QObject {
     int statsTicks_ = 0;
     qint64 statFrames_ = 0, statTime_ = 0;
     bool expanded_ = false;
+    bool optimized_ = false;
     luma::Settings settings_;
     QList<luma::Source> sourceList_;
     QList<luma::AudioSource> audioList_;

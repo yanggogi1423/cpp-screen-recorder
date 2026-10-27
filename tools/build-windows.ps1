@@ -19,9 +19,9 @@ $env:PATH="$qt/bin;$env:PATH"
 & (Join-Path (Split-Path $cmake) 'ctest.exe') --test-dir (Join-Path $root 'build') --output-on-failure
 if($LASTEXITCODE -ne 0){throw 'Tests failed.'}
 if($Deploy){
-    & $cmake --install (Join-Path $root 'build') --prefix (Join-Path $root 'dist/Luma-Windows-x64')
+    & $cmake --install (Join-Path $root 'build') --prefix (Join-Path $root 'dist/FARecorder-Windows-x64')
     if($LASTEXITCODE -ne 0){throw 'Deployment failed.'}
-    $bundle=Join-Path $root 'dist/Luma-Windows-x64'
+    $bundle=Join-Path $root 'dist/FARecorder-Windows-x64'
     if(Test-Path -LiteralPath (Join-Path $root 'tools/ffmpeg/bin/ffmpeg.exe')){
         Copy-Item -LiteralPath (Join-Path $root 'tools/ffmpeg/bin/ffmpeg.exe') -Destination (Join-Path $bundle 'bin/ffmpeg.exe') -Force
         Copy-Item -LiteralPath (Join-Path $root 'tools/ffmpeg/LICENSE.txt') -Destination (Join-Path $bundle 'FFmpeg-LICENSE.txt') -Force

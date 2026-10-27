@@ -6,7 +6,7 @@ try{
     New-Item -ItemType Directory -Path artifacts -Force | Out-Null
     $argsList=@('--workflow-test')
     if($StopPaused){$argsList+='--stop-paused'}
-    $test=Start-Process -FilePath "$root/dist/Luma-Windows-x64/bin/Luma.exe" -ArgumentList $argsList -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardError "$root/artifacts/workflow-stderr.log" -RedirectStandardOutput "$root/artifacts/workflow-stdout.log"
+    $test=Start-Process -FilePath "$root/dist/FARecorder-Windows-x64/bin/FARecorder.exe" -ArgumentList $argsList -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardError "$root/artifacts/workflow-stderr.log" -RedirectStandardOutput "$root/artifacts/workflow-stdout.log"
     if(-not $test.WaitForExit(50000)){$test.Kill();throw 'Workflow test timed out.'}
     if($test.ExitCode -ne 0){throw "Workflow failed with exit $($test.ExitCode)."}
     if(-not $StopPaused){
