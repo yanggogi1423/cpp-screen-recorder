@@ -27,12 +27,12 @@ The platform boundary produces BGRA frames and interleaved signed 16-bit stereo 
 - The application never calls OS volume setters. A recording slider does not turn down speakers or change a microphone used by a call.
 - OS controls can still affect the input received by capture. Their behavior must be measured for each API/OS/device; it is not promised to be identical on Windows and macOS.
 - An OS-linked mode is deliberately not exposed until its scope, feedback loop prevention, permissions and restoration behavior are designed and tested.
-- Selecting system audio and an included app simultaneously can duplicate sound. The UI explains this; automatic overlap detection is a follow-up.
+- The UI makes system audio and application audio mutually exclusive to avoid accidental duplicate capture. Microphones remain independently selectable.
 - Distinct browser tabs or Discord call participants within the same process are not isolated sources.
 
 ## Files and recovery
 
-Each recording gets a unique folder containing `video.mkv`, RF64 WAV tracks, `recording.mkv` or `recording.mp4`, logs and `session.json`. The final video has separately named AAC audio tracks. Typical media players play one audio track at a time; use an editor that supports multiple audio streams to mix them.
+Each recording gets a unique folder containing `video.mkv`, RF64 WAV tracks, `recording.mkv` or `recording.mp4`, logs and `session.json`. The final video has separately named AAC audio tracks. When two or more routes are selected, a default mixed playback track is also included for ordinary players, alongside the individual tracks.
 
 The trim editor decodes and re-encodes the chosen interval, retaining every audio stream. Before exporting, the app explicitly asks whether to save a new file or overwrite the original combined video. Overwrite first generates a complete sibling temporary file, then uses `QSaveFile` for an atomic replacement. A failed export preserves the original. The separate WAV / `video.mkv` recovery sources are unaffected. Source deletion and intermediate-file cleanup require a later explicit product design.
 

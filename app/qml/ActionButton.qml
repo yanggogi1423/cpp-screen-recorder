@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+
 Button {
     id: control
     property bool primary: false
@@ -14,7 +15,11 @@ Button {
         radius: 9
         color: control.danger ? (control.hovered ? "#ea5c77" : "#ce405e") : control.primary ? (control.hovered ? "#a48bff" : "#9270fa") : (control.hovered ? "#323443" : "#252735")
         border.color: control.primary || control.danger ? "transparent" : "#3b3d4e"
-        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on color {
+            ColorAnimation {
+                duration: 120
+            }
+        }
     }
     contentItem: Text {
         text: (control.glyph ? control.glyph + "  " : "") + control.text

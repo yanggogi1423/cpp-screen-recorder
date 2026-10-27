@@ -1,11 +1,7 @@
-src/bin/
 src/obj/
 .packages/
-tests/bin/
-tests/obj/
 tools/ffmpeg*/
 tools/*.zip
-tools/*.reference.cs
 artifacts/
 recordings/
 *.user

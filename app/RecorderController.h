@@ -1,22 +1,25 @@
 #pragma once
 #include "core/RecordingSession.h"
+#include <QMutex>
 #include <QObject>
-#include <QTimer>
-#include <QVariantList>
+#include <QProcess>
 #include <QQuickImageProvider>
 #include <QSet>
-#include <QProcess>
+#include <QTimer>
 #include <QUrl>
-#include <QMutex>
+#include <QVariantList>
 
-class PreviewProvider final:public QQuickImageProvider {
-public:
-    PreviewProvider():QQuickImageProvider(Image){}
-    QImage requestImage(const QString&,QSize* size,const QSize& requested)override;
+class PreviewProvider final : public QQuickImageProvider {
+  public:
+    PreviewProvider() : QQuickImageProvider(Image) {}
+    QImage requestImage(const QString &, QSize *size, const QSize &requested) override;
     void setFrame(QImage image);
-private:QMutex mutex_;QImage image_;
+
+  private:
+    QMutex mutex_;
+    QImage image_;
 };
-class RecorderController final:public QObject {
+class RecorderController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList displays READ displays NOTIFY sourcesChanged)
     Q_PROPERTY(QVariantList windows READ windows NOTIFY sourcesChanged)
@@ -33,40 +36,77 @@ class RecorderController final:public QObject {
     Q_PROPERTY(QUrl lastFile READ lastFile NOTIFY lastFileChanged)
     Q_PROPERTY(QString platformName READ platformName CONSTANT)
     Q_PROPERTY(bool encoderReady READ encoderReady CONSTANT)
-public:
-    explicit RecorderController(PreviewProvider*,QObject* parent=nullptr);
-    ~RecorderController()override;
-    QVariantList displays()const;QVariantList windows()const;QVariantList audio()const;
-    QVariantMap audioLevels()const;
-    QVariantMap settings()const;
-    QString state()const{return state_;}QString message()const{return message_;}
-    QString sourceName()const{return sourceName_;}bool hasSource()const{return video_!=nullptr;}
-    int previewRevision()const{return revision_;}int countdown()const{return countdown_;}
-    QString elapsed()const;
-    QUrl lastFile()const{return QUrl::fromLocalFile(lastFile_);}
-    QString platformName()const{return platform_->name();}
-    bool encoderReady()const{return !luma::RecordingSession::ffmpegPath().isEmpty();}
+  public:
+    explicit RecorderController(PreviewProvider *, QObject *parent = nullptr);
+    ~RecorderController() override;
+    QVariantList displays() const;
+    QVariantList windows() const;
+    QVariantList audio() const;
+    QVariantMap audioLevels() const;
+    QVariantMap settings() const;
+    QString state() const {
+        return state_;
+    }
+    QString message() const {
+        return message_;
+    }
+    QString sourceName() const {
+        return sourceName_;
+    }
+    bool hasSource() const {
+        return video_ != nullptr;
+    }
+    int previewRevision() const {
+        return revision_;
+    }
+    int countdown() const {
+        return countdown_;
+    }
+    QString elapsed() const;
+    QUrl lastFile() const {
+        return QUrl::fromLocalFile(lastFile_);
+    }
+    QString platformName() const {
+        return platform_->name();
+    }
+    bool encoderReady() const {
+        return !luma::RecordingSession::ffmpegPath().isEmpty();
+    }
     Q_INVOKABLE void refresh();
-    Q_INVOKABLE void connectSource(QString id,bool window=false);
+    Q_INVOKABLE void connectSource(QString id, bool window = false);
     Q_INVOKABLE void beginRegion(QString displayId);
-    Q_INVOKABLE void selectRegion(QString id,double x,double y,double width,double height,double scale);
-    Q_INVOKABLE void selectAudio(QString id,bool selected);
-    Q_INVOKABLE void setAudioGain(QString id,double gain);
-    Q_INVOKABLE void setAudioMuted(QString id,bool muted);
-    Q_INVOKABLE void setSetting(QString key,QVariant value);
+    Q_INVOKABLE void selectRegion(QString id, double x, double y, double width, double height,
+                                  double scale);
+    Q_INVOKABLE void selectAudio(QString id, bool selected);
+    Q_INVOKABLE void setAudioGain(QString id, double gain);
+    Q_INVOKABLE void setAudioMuted(QString id, bool muted);
+    Q_INVOKABLE void setSetting(QString key, QVariant value);
     Q_INVOKABLE void setOutputFolder(QUrl folder);
     Q_INVOKABLE void toggleRecording();
     Q_INVOKABLE void openOutputFolder();
     Q_INVOKABLE void openRecording(QUrl file);
     Q_INVOKABLE void clearMessage();
-    Q_INVOKABLE void exportTrim(double startSeconds,double endSeconds,bool overwrite);
-signals:
-    void sourcesChanged();void settingsChanged();void stateChanged();void messageChanged();void sourceChanged();void previewChanged();void tick();void lastFileChanged();
-    void regionRequested(QString displayId,int x,int y,int width,int height,double scale);
-    void editorRequested();void trimFinished(QUrl file);void closeAllowed();
-private:
-    void setState(QString state);void showMessage(QString message);void startNow();void saveSettings();
-    void attach(const luma::Source&,QRect crop={});
+    Q_INVOKABLE void exportTrim(double startSeconds, double endSeconds, bool overwrite);
+  signals:
+    void sourcesChanged();
+    void settingsChanged();
+    void stateChanged();
+    void messageChanged();
+    void sourceChanged();
+    void previewChanged();
+    void tick();
+    void lastFileChanged();
+    void regionRequested(QString displayId, int x, int y, int width, int height, double scale);
+    void editorRequested();
+    void trimFinished(QUrl file);
+    void closeAllowed();
+
+  private:
+    void setState(QString state);
+    void showMessage(QString message);
+    void startNow();
+    void saveSettings();
+    void attach(const luma::Source &, QRect crop = {});
     std::unique_ptr<luma::Platform> platform_;
     std::unique_ptr<luma::VideoCapture> video_;
     luma::RecordingSession session_;
@@ -74,11 +114,11 @@ private:
     QList<luma::Source> sourceList_;
     QList<luma::AudioSource> audioList_;
     QSet<QString> selectedAudio_;
-    PreviewProvider* preview_;
-    QTimer previewTimer_,countdownTimer_;
-    QString state_="idle",message_,sourceName_,lastFile_;
-    int revision_=0,countdown_=0;
+    PreviewProvider *preview_;
+    QTimer previewTimer_, countdownTimer_;
+    QString state_ = "idle", message_, sourceName_, lastFile_;
+    int revision_ = 0, countdown_ = 0;
     QProcess trimProcess_;
-    QString trimTemp_,trimTarget_;
-    bool overwrite_=false;
+    QString trimTemp_, trimTarget_;
+    bool overwrite_ = false;
 };
