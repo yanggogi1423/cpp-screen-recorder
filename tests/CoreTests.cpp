@@ -2,6 +2,7 @@
 #include "core/WaveWriter.h"
 #include "core/AudioCheck.h"
 #include "core/SessionTimeline.h"
+#include "core/RegionGeometry.h"
 #include <QCoreApplication>
 #include <QDataStream>
 #include <QFile>
@@ -180,6 +181,20 @@ int main(int argc, char **argv) {
         QFile audition(sample);
         require(audition.open(QIODevice::ReadOnly) && audition.size() > 80 + 9000 * 4,
                 "audio sample is missing/too short");
+        const QRect logical(-1280, 0, 1280, 720);
+        const QSize physical(1920, 1080);
+        const auto crop = luma::regionFromLogical(QRectF(-1180, 40, 201, 101), logical, physical);
+        require(crop == QRect(150, 60, 302, 152), "DPI region mapping/even dimensions incorrect");
+        const auto moved = luma::moveRegionPixels(crop, QPoint(99999, -50), physical);
+        require(moved == QRect(1618, 0, 302, 152), "translation must clamp and preserve size");
+        const auto translated = luma::regionToLogical(moved, logical, physical);
+        require(qAbs(translated.x() - (-1280 + 1618 / 1.5)) < 0.01,
+                "global logical overlay position incorrect");
+        require(luma::regionFromLogical(QRectF(-3000, 0, 20, 20), logical, physical).isEmpty(),
+                "outside selection must be rejected");
+        require(luma::regionFromLogical(QRectF(-1280, 0, 1280, 720), logical, physical).size() ==
+                    physical,
+                "full-screen region dimensions incorrect");
         std::cout
             << "PASS: settings, encoder arguments, RF64, timestamp gaps, overlap, silent tail\n";
         return 0;

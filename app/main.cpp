@@ -1,5 +1,8 @@
 #include "RecorderController.h"
 #include "AppInfo.h"
+#include "RegionFixture.h"
+#include "core/RegionGeometry.h"
+#include <QMouseEvent>
 #include <QAudioFormat>
 #include <QAudioSink>
 #include <QBuffer>
@@ -50,7 +53,8 @@ int main(int argc, char **argv) {
     const bool testing =
         arguments.contains("--ui-smoke") || arguments.contains("--capture-test") ||
         arguments.contains("--edit-test") || arguments.contains("--workflow-test") ||
-        arguments.contains("--encoder-test") || arguments.contains("--settings-test");
+        arguments.contains("--encoder-test") || arguments.contains("--settings-test") ||
+        arguments.contains("--region-test");
     if (testing) {
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(
@@ -130,6 +134,111 @@ int main(int argc, char **argv) {
     engine.loadFromModule("Luma", "Main");
     if (engine.rootObjects().isEmpty())
         return 1;
+    if (arguments.contains("--region-test")) {
+#ifdef Q_OS_WIN
+        QDir().mkpath("artifacts");
+        QFile::remove("artifacts/region-error.txt");
+        auto fixture = std::make_shared<RegionFixture>();
+        fixture->show();
+        auto *frame = qobject_cast<QQuickWindow *>(
+            engine.rootObjects().first()->findChild<QObject *>("captureRegionFrame"));
+        auto fail = [&app](QString error) {
+            QFile file("artifacts/region-error.txt");
+            file.open(QIODevice::WriteOnly);
+            file.write(error.toUtf8());
+            app.exit(21);
+        };
+        auto drag = [frame](double targetX, double targetY) {
+            const auto start = QPointF(frame->x() + 12, frame->y() + 10);
+            const auto destination =
+                start + QPointF(targetX - (frame->x() + 4),
+                                targetY - (frame->y() + frame->property("contentTop").toInt()));
+            QMouseEvent press(QEvent::MouseButtonPress, QPointF(12, 10), start, Qt::LeftButton,
+                              Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(frame, &press);
+            QMouseEvent move(QEvent::MouseMove, destination - QPointF(frame->position()),
+                             destination, Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(frame, &move);
+            QCoreApplication::processEvents();
+            QMouseEvent release(QEvent::MouseButtonRelease,
+                                destination - QPointF(frame->position()), destination,
+                                Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(frame, &release);
+        };
+        auto started = std::make_shared<bool>(false);
+        QObject::connect(
+            &controller, &RecorderController::stateChanged, &app,
+            [&, fixture, frame, fail, drag, started] {
+                if (controller.state() != "recording" || *started)
+                    return;
+                *started = true;
+                QTimer::singleShot(450, &app, [frame, fail] {
+                    if (!frame || !frame->isVisible() ||
+                        frame->mask().contains(QPoint(frame->width() / 2, frame->height() / 2))) {
+                        fail("Region frame does not have a click-through center");
+                        return;
+                    }
+                    DWORD affinity = 0;
+                    if (!GetWindowDisplayAffinity(reinterpret_cast<HWND>(frame->winId()),
+                                                  &affinity) ||
+                        affinity != WDA_EXCLUDEFROMCAPTURE) {
+                        fail("Region frame is not excluded from Windows capture");
+                        return;
+                    }
+                    frame->grabWindow().save("artifacts/region-frame.png");
+                });
+                QTimer::singleShot(800, &app, [&, fixture, drag, fail] {
+                    const auto x = fixture->x() + fixture->width() - 192;
+                    drag(x, fixture->y() + 32);
+                    if (qAbs(controller.regionInfo().value("x").toDouble() - x) > 1)
+                        fail("Dragging the frame during recording did not translate the crop");
+                });
+                QTimer::singleShot(1200, &controller, &RecorderController::togglePause);
+                QTimer::singleShot(1400, &app, [&, fixture, drag, fail] {
+                    drag(fixture->x() + 32, fixture->y() + 32);
+                    if (controller.state() != "paused" ||
+                        qAbs(controller.regionInfo().value("x").toDouble() - fixture->x() - 32) > 1)
+                        fail("Dragging while paused did not translate the crop");
+                });
+                QTimer::singleShot(1700, &controller, &RecorderController::togglePause);
+                QTimer::singleShot(2700, &controller, &RecorderController::toggleRecording);
+            });
+        QObject::connect(&controller, &RecorderController::lastFileChanged, &app, [&] {
+            QFile out("artifacts/region-result.json");
+            out.open(QIODevice::WriteOnly);
+            out.write(
+                QJsonDocument(QJsonObject{{"file", controller.lastFile().toLocalFile()},
+                                          {"width", controller.settings().value("width").toInt()},
+                                          {"height", controller.settings().value("height").toInt()},
+                                          {"dragVerified", true}})
+                    .toJson());
+            app.exit(0);
+        });
+        QTimer::singleShot(800, &app, [&, fixture, fail] {
+            const auto scale = fixture->devicePixelRatio();
+            const QSize pixels(qRound(fixture->width() * scale), qRound(fixture->height() * scale));
+            luma::Source source{QString::number(quintptr(fixture->winId())),
+                                "Silent region fixture",
+                                luma::SourceKind::Window,
+                                QRect(QPoint(), pixels),
+                                quint32(app.applicationPid()),
+                                fixture->geometry()};
+            const auto crop =
+                luma::regionFromLogical(QRectF(fixture->x() + 32, fixture->y() + 32, 160, 120),
+                                        fixture->geometry(), pixels);
+            controller.configureRegionTest(source, crop);
+            if (controller.settings().value("width").toInt() != crop.width() ||
+                !controller.regionInfo().value("active").toBool()) {
+                fail("Selected pixel dimensions were not used as output dimensions");
+                return;
+            }
+            QTimer::singleShot(400, &controller, &RecorderController::toggleRecording);
+        });
+        QTimer::singleShot(25000, &app, [fail] { fail("Silent region test timed out"); });
+#else
+        return 77;
+#endif
+    }
     if (arguments.contains("--encoder-test")) {
         QDir().mkpath("artifacts");
         QFile::remove("artifacts/preflight-trace.log");

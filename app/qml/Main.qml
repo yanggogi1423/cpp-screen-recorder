@@ -1238,6 +1238,68 @@ ApplicationWindow {
     }
 
     Window {
+        id: captureFrame
+        objectName: "captureRegionFrame"
+        title: "FARecorder · 녹화 영역"
+        flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.WindowDoesNotAcceptFocus
+        color: "transparent"
+        property int contentTop: recorder.regionInfo.handleBelow ? 4 : 30
+        visible: recorder.regionInfo.active === true && !region.visible && ["idle", "checking", "countdown", "starting", "recording", "paused"].indexOf(recorder.state) >= 0
+        x: (recorder.regionInfo.x || 0) - 4
+        y: (recorder.regionInfo.y || 0) - contentTop
+        width: (recorder.regionInfo.width || 0) + 8
+        height: (recorder.regionInfo.height || 0) + 34
+        onWidthChanged: recorder.configureRegionFrame(captureFrame)
+        onHeightChanged: recorder.configureRegionFrame(captureFrame)
+        onContentTopChanged: recorder.configureRegionFrame(captureFrame)
+        onVisibleChanged: if (visible)
+            Qt.callLater(function () {
+                recorder.configureRegionFrame(captureFrame);
+            })
+        Rectangle {
+            x: 1
+            y: captureFrame.contentTop - 3
+            width: parent.width - 2
+            height: (recorder.regionInfo.height || 0) + 6
+            color: "transparent"
+            border.width: 2
+            border.color: recorder.state === "paused" ? "#d1b57c" : root.activeRecording ? "#ef5751" : "#d0d0d0"
+        }
+        Rectangle {
+            width: parent.width
+            height: 26
+            y: recorder.regionInfo.handleBelow ? parent.height - 26 : 0
+            radius: 4
+            color: "#242424"
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                x: 8
+                width: parent.width - 16
+                text: recorder.regionInfo.pixelWidth + " × " + recorder.regionInfo.pixelHeight + " · 드래그해 이동"
+                color: "#eeeeee"
+                font.pixelSize: 11
+                elide: Text.ElideRight
+            }
+        }
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+            property point pressGlobal
+            property point initialRegion
+            onPressed: function (mouse) {
+                pressGlobal = mapToGlobal(mouse.x, mouse.y);
+                initialRegion = Qt.point(recorder.regionInfo.x, recorder.regionInfo.y);
+            }
+            onPositionChanged: function (mouse) {
+                if (pressed) {
+                    var position = mapToGlobal(mouse.x, mouse.y);
+                    recorder.moveRegion(initialRegion.x + position.x - pressGlobal.x, initialRegion.y + position.y - pressGlobal.y);
+                }
+            }
+        }
+    }
+
+    Window {
         id: region
         flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         color: "#77333333"
@@ -1293,7 +1355,9 @@ ApplicationWindow {
                     region.endY = mouse.y;
                 }
             }
-            onReleased: {
+            onReleased: function (mouse) {
+                region.endX = mouse.x;
+                region.endY = mouse.y;
                 region.visible = false;
                 recorder.selectRegion(region.displayId, Math.min(region.startX, region.endX), Math.min(region.startY, region.endY), Math.abs(region.endX - region.startX), Math.abs(region.endY - region.startY), region.scaleFactor);
             }

@@ -11,6 +11,8 @@
 #include <QSet>
 #include <QTimer>
 #include <QUrl>
+#include <QPointer>
+#include <QScreen>
 #include <QVariantList>
 
 class PreviewProvider final : public QQuickImageProvider {
@@ -54,6 +56,7 @@ class RecorderController final : public QObject {
     Q_PROPERTY(bool expanded READ expanded NOTIFY modeChanged)
     Q_PROPERTY(bool optimized READ optimized NOTIFY optimizedChanged)
     Q_PROPERTY(QVariantMap appInfo READ appInfo CONSTANT)
+    Q_PROPERTY(QVariantMap regionInfo READ regionInfo NOTIFY regionChanged)
   public:
     explicit RecorderController(PreviewProvider *, QObject *parent = nullptr);
     ~RecorderController() override;
@@ -125,6 +128,9 @@ class RecorderController final : public QObject {
         return optimized_;
     }
     QVariantMap appInfo() const;
+    QVariantMap regionInfo() const;
+    Q_INVOKABLE void moveRegion(double globalX, double globalY);
+    Q_INVOKABLE void configureRegionFrame(QObject *window);
     Q_INVOKABLE void setOptimized(bool value);
     Q_PROPERTY(QString throughput READ throughput NOTIFY tick)
     QString throughput() const {
@@ -146,6 +152,7 @@ class RecorderController final : public QObject {
     Q_INVOKABLE void checkEncoder();
     // C++-only fixture setup: the test may capture this process's own window only.
     void configureWorkflowTest(const luma::Source &, const QList<luma::AudioSource> &);
+    void configureRegionTest(const luma::Source &, QRect crop);
     Q_INVOKABLE void openOutputFolder();
     Q_INVOKABLE void openRecording(QUrl file);
     Q_INVOKABLE void clearMessage();
@@ -168,13 +175,20 @@ class RecorderController final : public QObject {
     void modeChanged();
     void optimizedChanged();
     void mixerChanged();
+    void regionChanged();
 
   private:
     void setState(QString state);
     void showMessage(QString message);
     void startNow();
     void saveSettings();
-    void attach(const luma::Source &, QRect crop = {});
+    bool attach(const luma::Source &, QRect crop = {});
+    void attachRegion(const luma::Source &, QRect, QRect logicalBounds);
+    QScreen *screenForSource(const luma::Source &) const;
+    luma::Source regionSource_;
+    QRect regionCrop_;
+    QRect regionLogicalBounds_;
+    QPointer<QScreen> regionScreen_;
     QList<luma::AudioSource> selectedSources() const;
     void prepareRecording();
     void beginCountdown();

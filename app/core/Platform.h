@@ -10,6 +10,9 @@ class VideoCapture {
                        ErrorCallback error) = 0;
     virtual QImage latestFrame() = 0;
     virtual void setCursor(bool enabled) = 0;
+    virtual void setRegion(const QRect &) {
+        throw std::runtime_error("이 캡처 경로는 영역 이동을 지원하지 않습니다.");
+    }
     virtual void stop() = 0;
 };
 class AudioCapture {

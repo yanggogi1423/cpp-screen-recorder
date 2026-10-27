@@ -86,6 +86,7 @@ class WinVideo final : public VideoCapture {
     QImage latest_;
     QRect crop_;
     QSize canvas_;
+    QSize contentSize_;
     std::atomic<bool> stopped_{true};
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
@@ -96,6 +97,32 @@ class WinVideo final : public VideoCapture {
     GraphicsCaptureItem item_{nullptr};
     event_token frameToken_{}, closedToken_{};
     ErrorCallback error_;
+    // Caller holds mutex_. A translated crop must update even when a static
+    // source has not produced another FrameArrived notification.
+    void publishFrame() {
+        if (!staging_)
+            return;
+        D3D11_TEXTURE2D_DESC desc;
+        staging_->GetDesc(&desc);
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        check(context_->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &mapped));
+        QImage image(canvas_, QImage::Format_ARGB32);
+        image.fill(Qt::black);
+        const int x = crop_.isEmpty() ? 0 : crop_.x(), y = crop_.isEmpty() ? 0 : crop_.y();
+        const int w = std::max(
+            0, std::min(canvas_.width(), std::min(int(desc.Width), contentSize_.width()) - x));
+        const int h = std::max(
+            0, std::min(canvas_.height(), std::min(int(desc.Height), contentSize_.height()) - y));
+        if (w > 0)
+            for (int row = 0; row < h; row++)
+                memcpy(image.scanLine(row),
+                       static_cast<const char *>(mapped.pData) + (row + y) * mapped.RowPitch +
+                           x * 4,
+                       size_t(w) * 4);
+        context_->Unmap(staging_.Get(), 0);
+        std::lock_guard frameLock(frameMutex_);
+        latest_ = std::move(image);
+    }
 
   public:
     ~WinVideo() override {
@@ -172,25 +199,8 @@ class WinVideo final : public VideoCapture {
                     check(device_->CreateTexture2D(&stagingDesc, nullptr, &staging_));
                 }
                 context_->CopyResource(staging_.Get(), texture.Get());
-                D3D11_MAPPED_SUBRESOURCE mapped{};
-                check(context_->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &mapped));
-                QImage image(canvas_, QImage::Format_ARGB32);
-                image.fill(Qt::black);
-                const int x = crop_.isEmpty() ? 0 : crop_.x(), y = crop_.isEmpty() ? 0 : crop_.y();
-                const int w = std::max(
-                    0, std::min(canvas_.width(), std::min(int(desc.Width), content.Width) - x));
-                const int h = std::max(
-                    0, std::min(canvas_.height(), std::min(int(desc.Height), content.Height) - y));
-                for (int row = 0; row < h; row++)
-                    memcpy(image.scanLine(row),
-                           static_cast<const char *>(mapped.pData) + (row + y) * mapped.RowPitch +
-                               x * 4,
-                           size_t(w) * 4);
-                context_->Unmap(staging_.Get(), 0);
-                {
-                    std::lock_guard frameLock(frameMutex_);
-                    latest_ = std::move(image);
-                }
+                contentSize_ = QSize(content.Width, content.Height);
+                publishFrame();
                 if (desc.Width != UINT(content.Width) || desc.Height != UINT(content.Height)) {
                     frame.Close();
                     sender.Recreate(rtDevice_, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2,
@@ -217,6 +227,13 @@ class WinVideo final : public VideoCapture {
     QImage latestFrame() override {
         std::lock_guard lock(frameMutex_);
         return latest_;
+    }
+    void setRegion(const QRect &region) override {
+        std::lock_guard lock(mutex_);
+        if (crop_.isEmpty() || region.size() != canvas_ || region.x() < 0 || region.y() < 0)
+            throw std::runtime_error("녹화 중에는 영역 크기를 유지해야 합니다.");
+        crop_ = region;
+        publishFrame();
     }
     void setCursor(bool enabled) override try {
         std::lock_guard lock(mutex_);

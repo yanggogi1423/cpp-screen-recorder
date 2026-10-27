@@ -1,5 +1,14 @@
 #include "RecorderController.h"
 #include "AppInfo.h"
+#include "core/RegionGeometry.h"
+#include <QWindow>
+#include <QtGui/qscreen_platform.h>
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #include <QDesktopServices>
 #include <QDir>
 #include <QGuiApplication>
@@ -385,7 +394,7 @@ void RecorderController::refresh() {
         showMessage(QString::fromUtf8(ex.what()));
     }
 }
-void RecorderController::attach(const luma::Source &source, QRect crop) {
+bool RecorderController::attach(const luma::Source &source, QRect crop) {
     try {
         auto capture = platform_->createVideoCapture();
         capture->start(source, crop, settings_.cursor, [this](QString error) {
@@ -399,6 +408,11 @@ void RecorderController::attach(const luma::Source &source, QRect crop) {
                 Qt::QueuedConnection);
         });
         video_ = std::move(capture);
+        regionCrop_ = crop;
+        regionSource_ = source;
+        regionLogicalBounds_ = {};
+        regionScreen_ = crop.isEmpty() ? nullptr : screenForSource(source);
+        emit regionChanged();
         preview_->setFrame({});
         revision_++;
         emit previewChanged();
@@ -406,8 +420,10 @@ void RecorderController::attach(const luma::Source &source, QRect crop) {
             source.name +
             (crop.isEmpty() ? "" : QString(" · %1 × %2 영역").arg(crop.width()).arg(crop.height()));
         emit sourceChanged();
+        return true;
     } catch (const std::exception &ex) {
         showMessage(QString::fromUtf8(ex.what()));
+        return false;
     }
 }
 void RecorderController::connectSource(QString id, bool window) {
@@ -422,36 +438,133 @@ void RecorderController::connectSource(QString id, bool window) {
 void RecorderController::beginRegion(QString id) {
     if (state_ != "idle")
         return;
-    int index = 0;
     for (const auto &source : sourceList_)
         if (source.kind == luma::SourceKind::Display) {
             if (source.id == id) {
-                const auto screens = QGuiApplication::screens();
-                const auto screen = screens.value(index, QGuiApplication::primaryScreen());
+                const auto screen = screenForSource(source);
+                if (!screen) {
+                    showMessage("선택한 디스플레이를 찾지 못했습니다. 새로고침해 주세요.");
+                    return;
+                }
                 const auto geo = screen->geometry();
                 emit regionRequested(id, geo.x(), geo.y(), geo.width(), geo.height(),
                                      double(source.bounds.width()) / geo.width());
                 return;
             }
-            index++;
         }
 }
 void RecorderController::selectRegion(QString id, double x, double y, double width, double height,
                                       double scale) {
+    Q_UNUSED(scale);
     if (state_ != "idle")
         return;
     for (const auto &source : sourceList_)
         if (source.id == id && source.kind == luma::SourceKind::Display) {
-            QRect crop(qRound(x * scale), qRound(y * scale), qRound(width * scale),
-                       qRound(height * scale));
-            crop = crop.intersected(QRect(QPoint(0, 0), source.bounds.size()));
-            if (crop.width() < 16 || crop.height() < 16) {
-                showMessage("16 × 16 픽셀 이상의 영역을 선택해 주세요.");
+            const auto screen = screenForSource(source);
+            if (!screen)
+                return;
+            const auto geo = screen->geometry();
+            const auto crop = luma::regionFromLogical(
+                QRectF(geo.x() + x, geo.y() + y, width, height), geo, source.bounds.size());
+            if (crop.width() < 64 || crop.height() < 64) {
+                showMessage("64 × 64 픽셀 이상의 영역을 선택해 주세요.");
                 return;
             }
-            attach(source, crop);
+            attachRegion(source, crop, geo);
             return;
         }
+}
+void RecorderController::attachRegion(const luma::Source &source, QRect crop, QRect logicalBounds) {
+    if (!attach(source, crop))
+        return;
+    regionLogicalBounds_ = logicalBounds;
+    if (!regionScreen_)
+        regionScreen_ = QGuiApplication::primaryScreen(); // Own-window fixture only.
+    settings_.width = crop.width();
+    settings_.height = crop.height();
+    saveSettings();
+    emit settingsChanged();
+    emit regionChanged();
+    encoderStatus_ = "unchecked";
+    checkedFingerprint_.clear();
+    emit encoderChanged();
+}
+void RecorderController::configureRegionTest(const luma::Source &source, QRect crop) {
+    if (source.processId != quint32(QCoreApplication::applicationPid()) ||
+        source.kind != luma::SourceKind::Window)
+        throw std::runtime_error("Region fixture must belong to this process.");
+    audioList_.clear();
+    selectedAudio_.clear();
+    settings_.fps = 30;
+    settings_.delaySeconds = 0;
+    settings_.encoder = "libx264";
+    settings_.outputFolder = QDir::current().absoluteFilePath("artifacts/region-recordings");
+    attachRegion(source, crop, source.logicalBounds);
+    emit sourcesChanged();
+}
+QScreen *RecorderController::screenForSource(const luma::Source &source) const {
+    for (auto *screen : QGuiApplication::screens()) {
+#ifdef Q_OS_WIN
+        if (auto *native = screen->nativeInterface<QNativeInterface::QWindowsScreen>();
+            native && quintptr(native->handle()) == source.id.toULongLong())
+            return screen;
+#else
+        if (!source.logicalBounds.isEmpty() && screen->geometry() == source.logicalBounds)
+            return screen;
+#endif
+    }
+    return nullptr;
+}
+QVariantMap RecorderController::regionInfo() const {
+    if (regionCrop_.isEmpty() || !regionScreen_)
+        return {{"active", false}};
+    const auto bounds =
+        regionLogicalBounds_.isEmpty() ? regionScreen_->geometry() : regionLogicalBounds_;
+    const auto rect = luma::regionToLogical(regionCrop_, bounds, regionSource_.bounds.size());
+    const auto screen = regionScreen_->geometry();
+    return {{"active", true},
+            {"x", rect.x()},
+            {"y", rect.y()},
+            {"width", rect.width()},
+            {"height", rect.height()},
+            {"handleBelow", rect.y() - screen.top() < 30 &&
+                                screen.y() + screen.height() - (rect.y() + rect.height()) >= 30},
+            {"pixelWidth", regionCrop_.width()},
+            {"pixelHeight", regionCrop_.height()}};
+}
+void RecorderController::moveRegion(double x, double y) {
+    if (!std::isfinite(x) || !std::isfinite(y) || !regionScreen_ || regionCrop_.isEmpty() ||
+        !video_ || (state_ != "idle" && state_ != "recording" && state_ != "paused"))
+        return;
+    const auto geo =
+        regionLogicalBounds_.isEmpty() ? regionScreen_->geometry() : regionLogicalBounds_;
+    const auto size = regionSource_.bounds.size();
+    const auto next =
+        luma::moveRegionPixels(regionCrop_,
+                               QPoint(qRound((x - geo.x()) * size.width() / geo.width()),
+                                      qRound((y - geo.y()) * size.height() / geo.height())),
+                               size);
+    if (next.isEmpty() || next == regionCrop_)
+        return;
+    try {
+        video_->setRegion(next);
+        regionCrop_ = next;
+        emit regionChanged();
+    } catch (const std::exception &ex) {
+        showMessage(QString::fromUtf8(ex.what()));
+    }
+}
+void RecorderController::configureRegionFrame(QObject *object) {
+    auto *window = qobject_cast<QWindow *>(object);
+    if (!window)
+        return;
+    window->setMask(QRegion(0, 0, window->width(), window->height()) -
+                    QRegion(4, window->property("contentTop").toInt(),
+                            std::max(0, window->width() - 8), std::max(0, window->height() - 34)));
+#ifdef Q_OS_WIN
+    if (QGuiApplication::platformName() == "windows")
+        SetWindowDisplayAffinity(reinterpret_cast<HWND>(window->winId()), WDA_EXCLUDEFROMCAPTURE);
+#endif
 }
 void RecorderController::selectAudio(QString id, bool selected) {
     if (state_ != "idle" || audioCheck_.active())

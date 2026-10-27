@@ -55,3 +55,7 @@ macOS code must compile in CI and pass physical-Mac permission, capture, timesta
 Public application/executable/bundle names are FARecorder. Internal library namespaces and the QML URI remain `luma` / `Luma`. AppInfo.h is the displayed release metadata. QSettings uses FARecorder/FARecorder and migrates the former Luma/Luma Recorder preferences once, leaving the former data in place and starting the renamed product in MP4. Fixture profiles explicitly use the isolated IniFormat for migration as well.
 
 Compact mode is controller state, allowed only while recording/paused. It never starts a new session or changes capture/mixer settings. The QML window preserves normal geometry and maximization, updates minimum dimensions before shrinking, hides the normal header/menu/content and restores before save/error/editor. Preview image copying stops while compact; capture, encoding, meters and elapsed timing continue.
+
+## Live region translation (0.3.0-alpha.3)
+
+RegionGeometry converts a global logical selection to display-local physical pixels and keeps output dimensions even. The selected region initializes output dimensions to its native size. Windows selects QScreen by HMONITOR; macOS uses display logical bounds. VideoCapture::setRegion changes only the origin, with fixed dimensions and serialized frame access. Cached full-frame data makes static-source translation immediate. The floating frame uses a hollow QWindow mask with all controls outside the ROI and Windows capture exclusion. See REGION_RECORDING.md for verification and boundaries.

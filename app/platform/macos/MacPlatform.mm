@@ -93,6 +93,8 @@ class MacVideo final : public VideoCapture {
     dispatch_queue_t queue_ = dispatch_queue_create("studio.luma.video", DISPATCH_QUEUE_SERIAL);
     std::mutex mutex_;
     QImage image_;
+    QImage fullFrame_;
+    QRect crop_;
 
   public:
     ~MacVideo() override {
@@ -100,6 +102,7 @@ class MacVideo final : public VideoCapture {
     }
     void start(const Source &source, const QRect &crop, bool cursor, ErrorCallback error) override {
         stop();
+        crop_ = crop;
         auto available = content();
         auto filter = filterFor(available, source);
         auto config = [[SCStreamConfiguration alloc] init];
@@ -112,7 +115,7 @@ class MacVideo final : public VideoCapture {
         config.showsCursor = cursor;
         output_ = [[LumaStreamOutput alloc] init];
         output_->onError = std::move(error);
-        output_->onSample = [this, crop](CMSampleBufferRef sample, SCStreamOutputType type) {
+        output_->onSample = [this](CMSampleBufferRef sample, SCStreamOutputType type) {
             if (type != SCStreamOutputTypeScreen || !CMSampleBufferIsValid(sample))
                 return;
             auto pixel = CMSampleBufferGetImageBuffer(sample);
@@ -122,10 +125,10 @@ class MacVideo final : public VideoCapture {
             QImage view(static_cast<const uchar *>(CVPixelBufferGetBaseAddress(pixel)),
                         int(CVPixelBufferGetWidth(pixel)), int(CVPixelBufferGetHeight(pixel)),
                         qsizetype(CVPixelBufferGetBytesPerRow(pixel)), QImage::Format_ARGB32);
-            auto copy = crop.isEmpty() ? view.copy() : view.copy(crop);
-            CVPixelBufferUnlockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly);
             std::lock_guard lock(mutex_);
-            image_ = std::move(copy);
+            fullFrame_ = view.copy();
+            image_ = crop_.isEmpty() ? fullFrame_ : fullFrame_.copy(crop_);
+            CVPixelBufferUnlockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly);
         };
         stream_ = [[SCStream alloc] initWithFilter:filter configuration:config delegate:output_];
         NSError *failure = nil;
@@ -139,6 +142,14 @@ class MacVideo final : public VideoCapture {
     QImage latestFrame() override {
         std::lock_guard lock(mutex_);
         return image_;
+    }
+    void setRegion(const QRect &region) override {
+        std::lock_guard lock(mutex_);
+        if (crop_.isEmpty() || region.size() != crop_.size() || region.x() < 0 || region.y() < 0)
+            throw std::runtime_error("녹화 중에는 영역 크기를 유지해야 합니다.");
+        crop_ = region;
+        if (!fullFrame_.isNull())
+            image_ = fullFrame_.copy(crop_);
     }
     void setCursor(bool enabled) override {
         if (stream_) {
@@ -160,6 +171,7 @@ class MacVideo final : public VideoCapture {
         output_ = nil;
         std::lock_guard lock(mutex_);
         image_ = {};
+        fullFrame_ = {};
     }
 };
 
@@ -344,7 +356,9 @@ class MacPlatform final : public Platform {
             result.append({QString::number(display.displayID),
                            QString("디스플레이 %1 · %2 × %3").arg(result.size() + 1).arg(w).arg(h),
                            SourceKind::Display,
-                           QRect(int(bounds.origin.x), int(bounds.origin.y), w, h)});
+                           QRect(int(bounds.origin.x), int(bounds.origin.y), w, h), 0,
+                           QRect(int(bounds.origin.x), int(bounds.origin.y), int(bounds.size.width),
+                                 int(bounds.size.height))});
         }
         for (SCWindow *window in available.windows) {
             if (window.owningApplication.processID == getpid() || window.frame.size.width < 32 ||

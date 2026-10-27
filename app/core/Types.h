@@ -29,6 +29,7 @@ struct Source {
     SourceKind kind = SourceKind::Display;
     QRect bounds;
     quint32 processId = 0;
+    QRect logicalBounds;
 };
 struct AudioSource {
     QString id, name, detail;
