@@ -1,5 +1,6 @@
 #pragma once
 #include "Platform.h"
+#include "SessionTimeline.h"
 #include <QObject>
 #include <atomic>
 #include <thread>
@@ -18,6 +19,13 @@ class RecordingSession : public QObject {
     qint64 frames() const {
         return frames_.load();
     }
+    void setPaused(bool value) {
+        timeline_.setPaused(value);
+    }
+    bool paused() const {
+        return timeline_.paused();
+    }
+    static QStringList probeArguments(const Settings &);
     static QString ffmpegPath();
     static QStringList videoArguments(const Settings &, QSize, const QString &);
   signals:
@@ -31,5 +39,6 @@ class RecordingSession : public QObject {
     std::thread thread_;
     std::atomic<bool> stop_{false};
     std::atomic<qint64> frames_{0};
+    SessionTimeline timeline_;
 };
 } // namespace luma

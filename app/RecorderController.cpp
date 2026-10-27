@@ -8,10 +8,18 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QUuid>
+#include <QStorageInfo>
 #include <cmath>
 
 QImage PreviewProvider::requestImage(const QString &, QSize *size, const QSize &requested) {
     QMutexLocker lock(&mutex_);
+    if (image_.isNull()) {
+        QImage blank(2, 2, QImage::Format_ARGB32);
+        blank.fill(Qt::black);
+        if (size)
+            *size = blank.size();
+        return blank;
+    }
     if (size)
         *size = image_.size();
     return requested.isValid()
@@ -25,6 +33,7 @@ void PreviewProvider::setFrame(QImage image) {
 RecorderController::RecorderController(PreviewProvider *preview, QObject *parent)
     : QObject(parent), platform_(luma::createPlatform()), preview_(preview) {
     QSettings store;
+    expanded_ = store.value("expanded", false).toBool();
     settings_.width = store.value("width", 1920).toInt();
     settings_.height = store.value("height", 1080).toInt();
     settings_.fps = store.value("fps", 60).toInt();
@@ -47,6 +56,27 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
                 revision_++;
                 emit previewChanged();
             }
+        }
+        if (++statsTicks_ % 7 == 0) {
+            const auto now = luma::clockNs();
+            const auto frames = session_.frames();
+            throughput_ =
+                state_ == "recording" && statTime_ && frames >= statFrames_
+                    ? QString::number((frames - statFrames_) * 1e9 / (now - statTime_), 'f', 1) +
+                          " fps"
+                    : "—";
+            statTime_ = now;
+            statFrames_ = frames;
+        }
+        if (statsTicks_ % 30 == 1) {
+            QDir path(settings_.outputFolder);
+            while (!path.exists() && path.cdUp()) {
+            }
+            QStorageInfo storage(path.absolutePath());
+            diskSpace_ =
+                storage.isValid()
+                    ? QString::number(storage.bytesAvailable() / 1073741824.0, 'f', 1) + " GB 여유"
+                    : "저장 위치 확인 필요";
         }
         emit tick();
     });
@@ -129,9 +159,86 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
             showMessage("편집 인코더를 실행하지 못했습니다.");
         }
     });
+    connect(&hotkeys_, &GlobalHotkeys::recordPressed, this, &RecorderController::toggleRecording);
+    connect(&hotkeys_, &GlobalHotkeys::pausePressed, this, &RecorderController::togglePause);
+    connect(&audioCheck_, &luma::AudioCheck::ready, this, [this] {
+        audioTestTimer_.restart();
+        audioTestStatus_ = "소리를 내거나 마이크에 말해 보세요";
+        emit audioTestChanged();
+    });
+    connect(&audioCheck_, &luma::AudioCheck::completed, this,
+            [this](QString file, QString error, double peak) {
+                audioSample_ = file;
+                audioTestStatus_ =
+                    !error.isEmpty() ? error
+                    : peak < 0.001 ? "소리가 감지되지 않았습니다. 소스·뮤트·장치 권한을 확인하세요."
+                                   : "테스트 완료 · 샘플을 들어볼 수 있습니다";
+                emit audioTestChanged();
+                if (pendingStart_) {
+                    pendingStart_ = false;
+                    if (error.isEmpty()) {
+                        setState("idle");
+                        prepareRecording();
+                    } else {
+                        setState("idle");
+                        showMessage(error);
+                    }
+                }
+            });
+    encoderTimeout_.setSingleShot(true);
+    encoderTimeout_.setInterval(15000);
+    connect(&encoderTimeout_, &QTimer::timeout, this, [this] {
+        encoderDetail_ = "인코더 응답 시간이 초과됐습니다.";
+        encoderProbe_.kill();
+    });
+    connect(&encoderProbe_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this](int code, QProcess::ExitStatus exit) {
+                encoderTimeout_.stop();
+                const auto error =
+                    QString::fromUtf8(encoderProbe_.readAllStandardError()).trimmed();
+                if (probeCancelled_) {
+                    pendingStart_ = false;
+                    encoderStatus_ = "unchecked";
+                    encoderDetail_ = "검사 취소";
+                    setState("idle");
+                    emit encoderChanged();
+                    return;
+                }
+                const bool passed = exit == QProcess::NormalExit && code == 0;
+                encoderStatus_ = passed ? "passed" : "failed";
+                encoderDetail_ = passed            ? "선택한 해상도·FPS의 실제 인코딩 통과"
+                                 : error.isEmpty() ? "인코더를 사용할 수 없습니다. CPU 인코더를 "
+                                                     "선택하거나 드라이버를 확인해 주세요."
+                                                   : error.right(1200);
+                checkedFingerprint_ = passed ? probingFingerprint_ : QString();
+                const bool start = pendingStart_;
+                pendingStart_ = false;
+                setState("idle");
+                emit encoderChanged();
+                if (passed && start)
+                    beginCountdown();
+                else if (!passed)
+                    showMessage(encoderDetail_);
+            });
+    connect(&encoderProbe_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            encoderTimeout_.stop();
+            pendingStart_ = false;
+            encoderStatus_ = "failed";
+            encoderDetail_ = "인코더를 실행하지 못했습니다.";
+            setState("idle");
+            emit encoderChanged();
+            showMessage(encoderDetail_);
+        }
+    });
     // Listing capture sources can request OS permission. Do it on explicit user refresh.
 }
 RecorderController::~RecorderController() {
+    audioCheck_.stopAndWait();
+    if (encoderProbe_.state() != QProcess::NotRunning) {
+        encoderProbe_.kill();
+        encoderProbe_.waitForFinished(2000);
+    }
     if (trimProcess_.state() != QProcess::NotRunning) {
         trimProcess_.kill();
         trimProcess_.waitForFinished();
@@ -190,7 +297,19 @@ QVariantMap RecorderController::audioLevels() const {
                              : s.kind == luma::AudioKind::Microphone ? "mic:"
                                                                      : "system:") +
                             s.id;
-        out[key] = state_ == "recording" ? s.mix->peak.exchange(0.0f) : 0.0f;
+        out[key] =
+            state_ == "recording" || audioCheck_.active() ? s.mix->peak.exchange(0.0f) : 0.0f;
+    }
+    return out;
+}
+QVariantMap RecorderController::mixStates() const {
+    QVariantMap out;
+    for (const auto &s : audioList_) {
+        const QString prefix = s.kind == luma::AudioKind::Application  ? "app:"
+                               : s.kind == luma::AudioKind::Microphone ? "mic:"
+                                                                       : "system:";
+        out[prefix + s.id] =
+            QVariantMap{{"gain", s.mix->gain.load()}, {"muted", s.mix->muted.load()}};
     }
     return out;
 }
@@ -208,7 +327,7 @@ QString RecorderController::elapsed() const {
         .arg(seconds % 60, 2, 10, QChar('0'));
 }
 void RecorderController::refresh() {
-    if (state_ != "idle")
+    if (state_ != "idle" || audioCheck_.active())
         return;
     try {
         sourceList_ = platform_->sources();
@@ -233,12 +352,15 @@ void RecorderController::attach(const luma::Source &source, QRect crop) {
                 this,
                 [this, error] {
                     showMessage(error);
-                    if (state_ == "recording")
+                    if (state_ == "recording" || state_ == "paused")
                         session_.requestStop();
                 },
                 Qt::QueuedConnection);
         });
         video_ = std::move(capture);
+        preview_->setFrame({});
+        revision_++;
+        emit previewChanged();
         sourceName_ =
             source.name +
             (crop.isEmpty() ? "" : QString(" · %1 × %2 영역").arg(crop.width()).arg(crop.height()));
@@ -291,7 +413,7 @@ void RecorderController::selectRegion(QString id, double x, double y, double wid
         }
 }
 void RecorderController::selectAudio(QString id, bool selected) {
-    if (state_ != "idle")
+    if (state_ != "idle" || audioCheck_.active())
         return;
     if (selected) {
         // System loopback already includes app audio; avoid accidental double capture.
@@ -315,6 +437,8 @@ void RecorderController::selectAudio(QString id, bool selected) {
     emit sourcesChanged();
 }
 void RecorderController::setAudioGain(QString id, double gain) {
+    if (!std::isfinite(gain))
+        return;
     for (auto &s : audioList_) {
         const QString key = (s.kind == luma::AudioKind::Application  ? "app:"
                              : s.kind == luma::AudioKind::Microphone ? "mic:"
@@ -323,6 +447,7 @@ void RecorderController::setAudioGain(QString id, double gain) {
         if (key == id)
             s.mix->gain = float(std::clamp(gain, 0.0, 2.0));
     }
+    emit mixerChanged();
 }
 void RecorderController::setAudioMuted(QString id, bool muted) {
     for (auto &s : audioList_) {
@@ -333,6 +458,7 @@ void RecorderController::setAudioMuted(QString id, bool muted) {
         if (key == id)
             s.mix->muted = muted;
     }
+    emit mixerChanged();
 }
 void RecorderController::setSetting(QString key, QVariant value) {
     if (state_ != "idle")
@@ -359,6 +485,11 @@ void RecorderController::setSetting(QString key, QVariant value) {
         }
     }
     emit settingsChanged();
+    if (encoderFingerprint() != checkedFingerprint_) {
+        encoderStatus_ = "unchecked";
+        encoderDetail_ = "설정 변경 · 다시 검사 필요";
+        emit encoderChanged();
+    }
     saveSettings();
 }
 void RecorderController::setOutputFolder(QUrl url) {
@@ -375,13 +506,25 @@ void RecorderController::saveSettings() {
         store.setValue(it.key(), it.value());
 }
 void RecorderController::toggleRecording() {
+    if (state_ == "checking") {
+        probeCancelled_ = true;
+        pendingStart_ = false;
+        encoderProbe_.kill();
+        return;
+    }
+    if (state_ == "preparing") {
+        pendingStart_ = false;
+        audioCheck_.requestStop();
+        setState("idle");
+        return;
+    }
     if (state_ == "countdown") {
         countdownTimer_.stop();
         countdown_ = 0;
         setState("idle");
         return;
     }
-    if (state_ == "recording") {
+    if (state_ == "recording" || state_ == "paused") {
         setState("saving");
         session_.requestStop();
         return;
@@ -394,15 +537,135 @@ void RecorderController::toggleRecording() {
             throw std::runtime_error("먼저 녹화할 화면을 연결해 주세요.");
         if (!encoderReady())
             throw std::runtime_error("FFmpeg를 설치해 주세요. README의 설치 방법을 확인해 주세요.");
-        if (settings_.delaySeconds) {
-            countdown_ = settings_.delaySeconds;
-            setState("countdown");
-            countdownTimer_.start();
-        } else
-            startNow();
+        if (audioCheck_.active()) {
+            pendingStart_ = true;
+            setState("preparing");
+            audioCheck_.requestStop();
+            return;
+        }
+        prepareRecording();
     } catch (const std::exception &ex) {
         showMessage(QString::fromUtf8(ex.what()));
     }
+}
+QString RecorderController::diskSpace() const {
+    return diskSpace_;
+}
+void RecorderController::setExpanded(bool value) {
+    expanded_ = value;
+    QSettings().setValue("expanded", value);
+    emit modeChanged();
+}
+int RecorderController::audioTestProgress() const {
+    return !audioCheck_.active() || !audioTestTimer_.isValid()
+               ? 0
+               : std::clamp(int(audioTestTimer_.elapsed() / 50), 0, 100);
+}
+QList<luma::AudioSource> RecorderController::selectedSources() const {
+    QList<luma::AudioSource> result;
+    for (const auto &source : audioList_) {
+        const QString prefix = source.kind == luma::AudioKind::Application  ? "app:"
+                               : source.kind == luma::AudioKind::Microphone ? "mic:"
+                                                                            : "system:";
+        if (selectedAudio_.contains(prefix + source.id))
+            result << source;
+    }
+    return result;
+}
+void RecorderController::toggleAudioTest() {
+    if (audioCheck_.active()) {
+        audioCheck_.requestStop();
+        return;
+    }
+    if (state_ != "idle")
+        return;
+    const auto selected = selectedSources();
+    if (selected.isEmpty()) {
+        showMessage("테스트할 마이크나 앱 소리를 먼저 선택해 주세요.");
+        return;
+    }
+    if (!audioTemp_.isValid()) {
+        showMessage("오디오 테스트 임시 폴더를 만들지 못했습니다.");
+        return;
+    }
+    audioTestTimer_.invalidate();
+    audioTestStatus_ = "오디오 소스 연결 중…";
+    audioSample_.clear();
+    audioCheck_.start(platform_.get(), selected,
+                      audioTemp_.filePath(QUuid::createUuid().toString(QUuid::Id128) + ".wav"));
+    emit audioTestChanged();
+}
+void RecorderController::togglePause() {
+    if (state_ == "recording") {
+        session_.setPaused(true);
+        setState("paused");
+    } else if (state_ == "paused") {
+        session_.setPaused(false);
+        setState("recording");
+    }
+}
+QString RecorderController::encoderFingerprint() const {
+    return QString("%1:%2:%3:%4")
+        .arg(settings_.encoder)
+        .arg(settings_.width)
+        .arg(settings_.height)
+        .arg(settings_.fps);
+}
+void RecorderController::checkEncoder() {
+    if (state_ != "idle")
+        return;
+    try {
+        settings_.validate();
+        if (!encoderReady())
+            throw std::runtime_error("녹화 엔진을 찾을 수 없습니다.");
+    } catch (const std::exception &error) {
+        pendingStart_ = false;
+        showMessage(QString::fromUtf8(error.what()));
+        return;
+    }
+    probeCancelled_ = false;
+    encoderStatus_ = "checking";
+    encoderDetail_ = "선택한 설정으로 실제 인코딩 중…";
+    probingFingerprint_ = encoderFingerprint();
+    setState("checking");
+    emit encoderChanged();
+    encoderProbe_.start(luma::RecordingSession::ffmpegPath(),
+                        luma::RecordingSession::probeArguments(settings_));
+    encoderTimeout_.start();
+}
+void RecorderController::prepareRecording() {
+    if (checkedFingerprint_ != encoderFingerprint()) {
+        pendingStart_ = true;
+        checkEncoder();
+    } else
+        beginCountdown();
+}
+void RecorderController::beginCountdown() {
+    if (settings_.delaySeconds) {
+        countdown_ = settings_.delaySeconds;
+        setState("countdown");
+        countdownTimer_.start();
+    } else
+        startNow();
+}
+void RecorderController::configureWorkflowTest(const luma::Source &source,
+                                               const QList<luma::AudioSource> &audio) {
+    if (source.processId != quint32(QCoreApplication::applicationPid()))
+        throw std::runtime_error("Test capture must belong to this process.");
+    sourceList_ = {source};
+    audioList_ = audio;
+    selectedAudio_.clear();
+    for (const auto &entry : audio)
+        selectedAudio_.insert("app:" + entry.id);
+    settings_.width = 640;
+    settings_.height = 360;
+    settings_.fps = 30;
+    settings_.delaySeconds = 0;
+    settings_.encoder = "libx264";
+    settings_.outputFolder = QDir::current().absoluteFilePath("artifacts/recordings");
+    emit settingsChanged();
+    emit sourcesChanged();
+    attach(source);
 }
 void RecorderController::startNow() {
     QList<luma::AudioSource> selected;

@@ -6,6 +6,7 @@ Button {
     property bool primary: false
     property bool danger: false
     property string glyph: ""
+    property url asset: ""
     implicitHeight: 42
     implicitWidth: Math.max(80, contentItem.implicitWidth + 32)
     font.pixelSize: 13
@@ -13,8 +14,8 @@ Button {
     opacity: enabled ? 1 : 0.4
     background: Rectangle {
         radius: 9
-        color: control.danger ? (control.hovered ? "#ea5c77" : "#ce405e") : control.primary ? (control.hovered ? "#a48bff" : "#9270fa") : (control.hovered ? "#323443" : "#252735")
-        border.color: control.primary || control.danger ? "transparent" : "#3b3d4e"
+        color: control.danger ? (control.hovered ? "#ed5656" : "#d94747") : control.primary ? (control.hovered ? "#ffffff" : "#e6e6e6") : (control.hovered ? "#303030" : "#222222")
+        border.color: control.primary || control.danger ? "transparent" : "#383838"
         Behavior on color {
             ColorAnimation {
                 duration: 120
@@ -23,7 +24,7 @@ Button {
     }
     contentItem: Text {
         text: (control.glyph ? control.glyph + "  " : "") + control.text
-        color: control.primary ? "#13101e" : "#ececf4"
+        color: control.primary ? "#141414" : "#e8e8e8"
         font: control.font
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter

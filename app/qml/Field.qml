@@ -5,14 +5,14 @@ TextField {
     id: control
     implicitHeight: 40
     implicitWidth: 72
-    color: "#f2f1fa"
+    color: "#eeeeee"
     selectByMouse: true
-    selectionColor: "#7255c3"
+    selectionColor: "#555555"
     font.pixelSize: 14
     leftPadding: 12
     background: Rectangle {
         radius: 8
-        color: "#12141c"
-        border.color: control.activeFocus ? "#a48bff" : "#363847"
+        color: "#151515"
+        border.color: control.activeFocus ? "#bbbbbb" : "#3b3b3b"
     }
 }

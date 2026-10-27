@@ -3,10 +3,12 @@ import array
 import json
 import math
 import subprocess
+import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-result = json.loads((root / "artifacts/capture-result.json").read_text(encoding="utf-8"))
+result_path=Path(sys.argv[1]) if len(sys.argv)>1 else root / "artifacts/capture-result.json"
+result = json.loads(result_path.read_text(encoding="utf-8"))
 folder = Path(result["file"]).parent
 tracks = []
 for path in sorted(folder.glob("*.wav")):
@@ -73,4 +75,13 @@ distinct = {line.rsplit(",", 1)[-1].strip() for line in hashes.splitlines() if n
 assert len(distinct) > 10, "Native capture did not update animated test frames"
 report = dict(passed=True, tracks=tracks, video=video, audio_tracks=len(audio), distinct_frames=len(distinct), mix_amplitudes=mix_amplitudes)
 (root / "artifacts/audio-verification.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+if "pauseObserved" in result:
+    assert result["pauseObserved"] and result["encoderPassed"] and result["hotkeysRegistered"]
+    manifest=json.loads((folder / "session.json").read_text(encoding="utf-8"))
+    assert .85<float(manifest["pausedSeconds"])<1.2
+    audition=(root / "artifacts/audition.wav").read_bytes()
+    assert audition[:4]==b"RF64" and len(audition)>=80+48000*4*4.9
+    report["pausedSeconds"]=manifest["pausedSeconds"]
+    report["auditionDuration"]=(len(audition)-80)/192000
+    (root / "artifacts/workflow-verification.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
 print(json.dumps(report, indent=2))

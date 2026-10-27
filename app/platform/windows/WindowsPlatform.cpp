@@ -450,6 +450,7 @@ class WinPlatform final : public Platform {
     QList<AudioSource> audioSources() override {
         Apartment apartment;
         QList<AudioSource> result;
+        QSet<QString> defaultIds;
         QSet<DWORD> pids;
         QHash<DWORD, DWORD> parents;
         QHash<DWORD, QString> names;
@@ -467,6 +468,9 @@ class WinPlatform final : public Platform {
         check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                                IID_PPV_ARGS(&devices)));
         for (const auto flow : {eCapture, eRender}) {
+            ComPtr<IMMDevice> preferred;
+            if (SUCCEEDED(devices->GetDefaultAudioEndpoint(flow, eConsole, &preferred)))
+                defaultIds.insert(deviceId(preferred.Get()));
             ComPtr<IMMDeviceCollection> collection;
             check(devices->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection));
             UINT count = 0;
@@ -513,6 +517,16 @@ class WinPlatform final : public Platform {
                 }
             }
         }
+        std::stable_sort(result.begin(), result.end(),
+                         [&](const AudioSource &a, const AudioSource &b) {
+                             const auto rank = [&](const AudioSource &source) {
+                                 return source.kind == AudioKind::Application ? 4
+                                        : source.kind == AudioKind::Microphone
+                                            ? (defaultIds.contains(source.id) ? 0 : 1)
+                                            : (defaultIds.contains(source.id) ? 2 : 3);
+                             };
+                             return rank(a) < rank(b);
+                         });
         return result;
     }
     std::unique_ptr<VideoCapture> createVideoCapture() override {

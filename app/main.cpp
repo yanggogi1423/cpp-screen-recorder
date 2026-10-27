@@ -9,6 +9,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMediaPlayer>
+#include <QIcon>
+#include <QSettings>
 #include <QPainter>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -17,6 +19,7 @@
 #include <QShortcut>
 #include <QTimer>
 #include <cmath>
+#include <array>
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <winrt/base.h>
@@ -29,7 +32,8 @@ int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
     app.setOrganizationName("Luma");
     app.setApplicationName("Luma Recorder");
-    app.setApplicationVersion("0.1.0-alpha.1");
+    app.setApplicationVersion("0.2.0-alpha.1");
+    app.setWindowIcon(QIcon("qrc:/assets/app-icon.png"));
 #ifdef Q_OS_WIN
     // The offscreen Qt test platform does not enumerate the Windows font store.
     QFontDatabase::addApplicationFont(qEnvironmentVariable("WINDIR") + "/Fonts/malgun.ttf");
@@ -37,6 +41,17 @@ int main(int argc, char **argv) {
 #endif
     QQuickStyle::setStyle("Basic");
     const auto arguments = app.arguments();
+    const bool testing = arguments.contains("--ui-smoke") || arguments.contains("--capture-test") ||
+                         arguments.contains("--edit-test") ||
+                         arguments.contains("--workflow-test") ||
+                         arguments.contains("--encoder-test");
+    if (testing) {
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(
+            QSettings::IniFormat, QSettings::UserScope,
+            QDir::current().absoluteFilePath("artifacts/test-settings/" +
+                                             QString::number(QCoreApplication::applicationPid())));
+    }
     if (arguments.contains("--tone")) {
         const int index = arguments.indexOf("--tone");
         const double hz = arguments.value(index + 1, "440").toDouble();
@@ -44,8 +59,8 @@ int main(int argc, char **argv) {
         format.setSampleRate(48000);
         format.setChannelCount(2);
         format.setSampleFormat(QAudioFormat::Int16);
-        QByteArray samples(48000 * 4 * 12, 0);
-        for (int frame = 0; frame < 48000 * 12; frame++) {
+        QByteArray samples(48000 * 4 * 30, 0);
+        for (int frame = 0; frame < 48000 * 30; frame++) {
             const auto sample =
                 qint16(500 * std::sin(2.0 * 3.141592653589793 * hz * frame / 48000));
             qToLittleEndian(sample, samples.data() + frame * 4);
@@ -55,11 +70,13 @@ int main(int argc, char **argv) {
         buffer.open(QIODevice::ReadOnly);
         QAudioSink sink(format);
         QTimer::singleShot(1500, &app, [&] { sink.start(&buffer); });
-        QTimer::singleShot(13500, &app, &QCoreApplication::quit);
+        QTimer::singleShot(31500, &app, &QCoreApplication::quit);
         return app.exec();
     }
     auto *preview = new PreviewProvider;
     RecorderController controller(preview);
+    if (arguments.contains("--expanded"))
+        controller.setExpanded(true);
     // QML must be destroyed before its context object to avoid teardown bindings
     // evaluating against a deleted controller.
     QQmlApplicationEngine engine;
@@ -71,6 +88,160 @@ int main(int argc, char **argv) {
     engine.loadFromModule("Luma", "Main");
     if (engine.rootObjects().isEmpty())
         return 1;
+    if (arguments.contains("--encoder-test")) {
+        if (arguments.contains("--encoder"))
+            controller.setSetting("encoder", arguments.value(arguments.indexOf("--encoder") + 1));
+        controller.setSetting("width", 640);
+        controller.setSetting("height", 360);
+        controller.setSetting("fps", 30);
+        QObject::connect(&controller, &RecorderController::encoderChanged, &app, [&] {
+            if (controller.encoderStatus() == "passed") {
+                QDir().mkpath("artifacts");
+                QFile out("artifacts/encoder-result.json");
+                out.open(QIODevice::WriteOnly);
+                out.write(QJsonDocument(
+                              QJsonObject{{"passed", true}, {"detail", controller.encoderDetail()}})
+                              .toJson());
+                app.exit(arguments.contains("--expect-failure") ? 10 : 0);
+            } else if (controller.encoderStatus() == "failed") {
+                QFile out("artifacts/encoder-failure-result.json");
+                out.open(QIODevice::WriteOnly);
+                out.write(QJsonDocument(QJsonObject{{"failedAsExpected",
+                                                     arguments.contains("--expect-failure")},
+                                                    {"detail", controller.encoderDetail()},
+                                                    {"idle", controller.state() == "idle"}})
+                              .toJson());
+                app.exit(arguments.contains("--expect-failure") ? 0 : 10);
+            }
+        });
+        QTimer::singleShot(0, &controller, &RecorderController::checkEncoder);
+        QTimer::singleShot(20000, &app, [] { QCoreApplication::exit(11); });
+    }
+    if (arguments.contains("--workflow-test")) {
+#ifdef Q_OS_WIN
+        QDir().mkpath("artifacts");
+        QFile::remove("artifacts/workflow-result.json");
+        QFile::remove("artifacts/workflow-error.txt");
+        auto *root = engine.rootObjects().first();
+        auto *window = qobject_cast<QQuickWindow *>(root);
+        ShowWindow(reinterpret_cast<HWND>(window->winId()), SW_SHOWNOACTIVATE);
+        auto *animation = new QTimer(&app);
+        animation->setInterval(50);
+        QObject::connect(animation, &QTimer::timeout, &app, [root] {
+            root->setProperty("captureTestTick", root->property("captureTestTick").toInt() + 1);
+        });
+        animation->start();
+        auto tones = std::make_shared<std::array<QProcess, 2>>();
+        (*tones)[0].start(app.applicationFilePath(), {"--tone", "440"});
+        (*tones)[1].start(app.applicationFilePath(), {"--tone", "880"});
+        (*tones)[0].waitForStarted();
+        (*tones)[1].waitForStarted();
+        auto recordingStarted = std::make_shared<bool>(false);
+        auto auditionFinished = std::make_shared<bool>(false);
+        auto pauseObserved = std::make_shared<bool>(false);
+        const auto uiThread = GetCurrentThreadId();
+        auto fail = [&app](QString error) {
+            QFile out("artifacts/workflow-error.txt");
+            out.open(QIODevice::WriteOnly);
+            out.write(error.toUtf8());
+            app.exit(12);
+        };
+        QObject::connect(&controller, &RecorderController::audioTestChanged, &app,
+                         [&, auditionFinished, tones, fail, uiThread] {
+                             if (!controller.audioTestActive() &&
+                                 !controller.audioSample().isEmpty() && !*auditionFinished) {
+                                 *auditionFinished = true;
+                                 QFile::remove("artifacts/audition.wav");
+                                 QFile::copy(controller.audioSample().toLocalFile(),
+                                             "artifacts/audition.wav");
+                                 if (controller.audioTestStatus().contains("소리가 감지되지")) {
+                                     fail(controller.audioTestStatus());
+                                     return;
+                                 }
+                                 PostThreadMessage(uiThread, WM_HOTKEY, GlobalHotkeys::RecordId, 0);
+                             }
+                         });
+        QObject::connect(
+            &controller, &RecorderController::stateChanged, &app,
+            [&, recordingStarted, pauseObserved, tones, fail, uiThread] {
+                if (controller.state() == "paused")
+                    *pauseObserved = true;
+                if (controller.state() == "recording" && !*recordingStarted) {
+                    *recordingStarted = true;
+                    QTimer::singleShot(1800, &app, [&controller, tones] {
+                        controller.setAudioGain("app:" + QString::number((*tones)[0].processId()),
+                                                0.5);
+                    });
+                    QTimer::singleShot(2000, &app, [uiThread] {
+                        PostThreadMessage(uiThread, WM_HOTKEY, GlobalHotkeys::PauseId, 0);
+                    });
+                    if (!arguments.contains("--stop-paused"))
+                        QTimer::singleShot(3000, &app, [uiThread] {
+                            PostThreadMessage(uiThread, WM_HOTKEY, GlobalHotkeys::PauseId, 0);
+                        });
+                    QTimer::singleShot(3800, &app, [&controller, tones] {
+                        controller.setAudioMuted("app:" + QString::number((*tones)[1].processId()),
+                                                 true);
+                    });
+                    QTimer::singleShot(4800, &app, [&controller, tones] {
+                        controller.setAudioMuted("app:" + QString::number((*tones)[1].processId()),
+                                                 false);
+                    });
+                    QTimer::singleShot(
+                        arguments.contains("--stop-paused") ? 2800 : 6000, &app, [uiThread] {
+                            PostThreadMessage(uiThread, WM_HOTKEY, GlobalHotkeys::RecordId, 0);
+                        });
+                }
+            });
+        QObject::connect(
+            &controller, &RecorderController::lastFileChanged, &app, [&, tones, pauseObserved] {
+                const auto file = controller.lastFile().toLocalFile();
+                if (file.isEmpty())
+                    return;
+                QFile out("artifacts/workflow-result.json");
+                out.open(QIODevice::WriteOnly);
+                out.write(
+                    QJsonDocument(
+                        QJsonObject{{"file", file},
+                                    {"warning", QString()},
+                                    {"pauseObserved", *pauseObserved},
+                                    {"encoderPassed", controller.encoderStatus() == "passed"},
+                                    {"hotkeysRegistered", controller.globalHotkeysAvailable()}})
+                        .toJson());
+                for (auto &process : *tones) {
+                    process.kill();
+                    process.waitForFinished();
+                }
+                app.exit(*pauseObserved ? 0 : 13);
+            });
+        QTimer::singleShot(2100, &app, [&, tones, fail, window] {
+            if (!controller.globalHotkeysAvailable()) {
+                fail(controller.hotkeyStatus());
+                return;
+            }
+            luma::Source source{QString::number(quintptr(window->winId())), "Luma workflow fixture",
+                                luma::SourceKind::Window, QRect(0, 0, 780, 780),
+                                quint32(QCoreApplication::applicationPid())};
+            QList<luma::AudioSource> audio{
+                {QString::number((*tones)[0].processId()), "Tone440", "test",
+                 luma::AudioKind::Application, quint32((*tones)[0].processId())},
+                {QString::number((*tones)[1].processId()), "Tone880", "test",
+                 luma::AudioKind::Application, quint32((*tones)[1].processId())}};
+            controller.configureWorkflowTest(source, audio);
+            const auto fingerprint = controller.settings();
+            controller.setExpanded(true);
+            controller.setExpanded(false);
+            if (controller.settings() != fingerprint || controller.audio().size() != 2) {
+                fail("Mode switch changed capture settings");
+                return;
+            }
+            controller.toggleAudioTest();
+        });
+        QTimer::singleShot(40000, &app, [fail] { fail("Workflow test timed out"); });
+#else
+        return 77;
+#endif
+    }
     if (arguments.contains("--capture-test")) {
 #ifdef Q_OS_WIN
         QDir().mkpath("artifacts");
@@ -245,7 +416,8 @@ int main(int argc, char **argv) {
             const auto image = window->grabWindow();
             if (!image.isNull()) {
                 QDir().mkpath("artifacts");
-                image.save("artifacts/ui-preview.png");
+                image.save(arguments.contains("--expanded") ? "artifacts/ui-expanded.png"
+                                                            : "artifacts/ui-preview.png");
             }
             app.exit(0);
         });

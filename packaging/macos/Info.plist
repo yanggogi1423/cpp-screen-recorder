@@ -5,9 +5,10 @@
 <key>CFBundleIdentifier</key><string>studio.luma.recorder</string>
 <key>CFBundleName</key><string>Luma</string>
 <key>CFBundleDisplayName</key><string>Luma Recorder</string>
+<key>CFBundleIconFile</key><string>Luma.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>0.2.0</string>
+<key>CFBundleVersion</key><string>2</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSMicrophoneUsageDescription</key><string>선택한 마이크를 독립 오디오 트랙으로 녹음합니다.</string>

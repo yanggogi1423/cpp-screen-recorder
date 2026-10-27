@@ -74,6 +74,24 @@ RecordingSession::~RecordingSession() {
     if (thread_.joinable())
         thread_.join();
 }
+QStringList RecordingSession::probeArguments(const Settings &settings) {
+    auto args = videoArguments(settings, QSize(settings.width, settings.height), "unused");
+    args = args.mid(args.indexOf("-c:v"));
+    args.removeLast();
+    return QStringList{"-hide_banner",
+                       "-v",
+                       "error",
+                       "-f",
+                       "lavfi",
+                       "-i",
+                       QString("color=c=black:s=%1x%2:r=%3")
+                           .arg(settings.width)
+                           .arg(settings.height)
+                           .arg(settings.fps),
+                       "-frames:v",
+                       "3"} +
+           args + QStringList{"-f", "null", "-"};
+}
 void RecordingSession::start(Platform *platform, VideoCapture *video, const Settings &settings,
                              const QList<AudioSource> &sources) {
     settings.validate();
@@ -120,6 +138,7 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
             throw std::runtime_error(encoder.errorString().toStdString());
         QJsonArray trackInfo;
         const qint64 origin = clockNs();
+        timeline_.reset(origin);
         for (qsizetype i = 0; i < sources.size(); i++) {
             const auto &source = sources[i];
             auto safe = source.name.left(60);
@@ -136,7 +155,8 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
                 [&, writer, origin, mix = source.mix](AudioPacket packet) {
                     try {
                         applyMix(packet, *mix);
-                        writer->append(packet, origin);
+                        for (const auto &projected : timeline_.project(packet))
+                            writer->append(projected, origin);
                     } catch (const std::exception &ex) {
                         QMutexLocker lock(&errorMutex);
                         audioError = QString::fromUtf8(ex.what());
@@ -162,7 +182,11 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
                     break;
                 }
             }
-            const auto elapsed = clockNs() - origin;
+            if (timeline_.paused()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(3));
+                continue;
+            }
+            const auto elapsed = timeline_.elapsed();
             const auto due = elapsed * s.fps / 1000000000;
             if (frames_ > due) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -207,7 +231,7 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
             if (encoder.state() == QProcess::NotRunning)
                 throw std::runtime_error(
                     ("인코더가 종료됐습니다.\n" + QString::fromUtf8(tail)).toStdString());
-            if (clockNs() - origin - frames_.load() * 1000000000 / s.fps > 5000000000LL) {
+            if (timeline_.elapsed() - frames_.load() * 1000000000 / s.fps > 5000000000LL) {
                 warning =
                     "인코딩 속도가 부족합니다. GPU 인코더를 선택하거나 해상도·FPS를 낮춰 주세요.";
                 break;
@@ -275,17 +299,19 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
                 "트랙 결합에 실패했습니다. video.mkv와 WAV 원본은 녹화 폴더에 있습니다.");
         QFile manifest(QDir(folder).filePath("session.json"));
         if (manifest.open(QIODevice::WriteOnly))
-            manifest.write(QJsonDocument(QJsonObject{{"version", "0.1.0"},
-                                                     {"width", s.width},
-                                                     {"height", s.height},
-                                                     {"fps", s.fps},
-                                                     {"frames", double(frames_)},
-                                                     {"duplicateFrames", double(duplicateFrames)},
-                                                     {"durationSeconds", duration / 1e9},
-                                                     {"tracks", trackInfo},
-                                                     {"mixedPlaybackTrack", bool(offset)},
-                                                     {"warning", warning}})
-                               .toJson());
+            manifest.write(
+                QJsonDocument(QJsonObject{{"version", "0.1.0"},
+                                          {"width", s.width},
+                                          {"height", s.height},
+                                          {"fps", s.fps},
+                                          {"frames", double(frames_)},
+                                          {"duplicateFrames", double(duplicateFrames)},
+                                          {"durationSeconds", duration / 1e9},
+                                          {"tracks", trackInfo},
+                                          {"mixedPlaybackTrack", bool(offset)},
+                                          {"pausedSeconds", timeline_.pausedDuration() / 1e9},
+                                          {"warning", warning}})
+                    .toJson());
         emit finished(output, warning);
     } catch (const std::exception &ex) {
         stopCaptures();
