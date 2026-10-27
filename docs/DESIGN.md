@@ -28,3 +28,7 @@ These are references for interaction structure; no third-party artwork or brandi
 The 400×104 logical-pixel recording view contains status, elapsed time, pause/resume, stop and a restore button. Drag the timer area to move it. Its menu, normal header, preview and settings are hidden. Restore returns to the previous view and window geometry while recording continues, allowing live mixer changes. Stop/failure restores the normal window before saving/editing. Pause does not reopen or shrink the window again.
 
 Normal simple/expanded views have File, Edit and Help menus. File selects/opens the configured recording root and exits through the existing close guard. Edit opens a video for trimming or edits the most recent file. Help shows the version, repository owner as creator, last source-update date and repository/issues links. The simple footer also exposes the configured path and folder chooser. Output defaults to MP4; MKV remains available in expanded settings.
+
+## Typography — 0.3.0-alpha.2
+
+D2Coding 1.4.0 standard Regular/Bold faces are embedded in Qt resources and loaded before any QML view is created on both platforms. The application default, window controls, menus and timer use the same family. This replaces the former Windows/macOS system-family split and Consolas timer override. The official unmodified fonts and OFL notice ship with the application; no OS font installation is needed.

@@ -30,3 +30,11 @@ The first compact test exposed a real minimum-size binding order issue: the resi
 The EXE version resource reports FARecorder / FARecorder.exe / 0.3.0-alpha.1. Simple, expanded, compact and About renders are inspected for clipping and readable controls. Portable packaging includes the Qt deployment, FFmpeg and component notices; its extracted executable is smoke-tested without the development Qt PATH.
 
 The Windows/macOS build matrix is available in [GitHub Actions](https://github.com/yanggogi1423/cpp-screen-recorder/actions). macOS runs core, QML and settings checks; its physical recording, permissions, microphone and hotkeys remain unverified here. CI is not a substitute for those device tests. High-FPS/4K endurance and signed installers remain outside this pass.
+
+## D2Coding update — 0.3.0-alpha.2, 2026-10-28
+
+D2Coding 1.4.0 standard Regular/Bold are embedded from NAVER's official release, with the unchanged OFL copyright/license included in sources, Qt resources and deployment. The global application font, main window and both timers use D2Coding. No system fonts are installed.
+
+All six local checks pass. Simple, expanded and About renders are inspected for Korean/Latin text, numbers and control clipping. The actual Windows workflow additionally renders the 400×104 compact recording view and verifies recording, pause, output and independent audio tracks with the new font.
+
+This update also exposed a Korean-only MSVC installation whose CMake `/showIncludes` prefix was corrupted, leaving zero Ninja header dependencies and stale objects after a metadata header change. The build script now applies the correct project-local prefix only for that language-resource combination and offers `-Clean` to rebuild old objects. Dependency inspection reports 241 headers for the controller; touching AppInfo.h schedules both dependent sources for rebuilding. English CI installations retain normal prefix detection.

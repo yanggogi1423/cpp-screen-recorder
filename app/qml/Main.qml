@@ -23,7 +23,7 @@ ApplicationWindow {
     flags: Qt.platform.os === "windows" ? Qt.Window | Qt.FramelessWindowHint : Qt.Window
     title: "FARecorder"
     color: "#141414"
-    font.family: Qt.platform.os === "osx" ? "Apple SD Gothic Neo" : "Malgun Gothic"
+    font.family: "D2Coding"
     palette.window: "#1c1c1c"
     palette.base: "#151515"
     palette.text: "#eeeeee"
@@ -489,7 +489,7 @@ ApplicationWindow {
                 Text {
                     text: recorder.elapsed
                     color: "#f0f0f0"
-                    font.family: "Consolas"
+                    font.family: root.font.family
                     font.pixelSize: 27
                 }
                 MouseArea {
@@ -901,7 +901,7 @@ ApplicationWindow {
                     Text {
                         text: recorder.elapsed
                         color: "#f0f0f0"
-                        font.family: "Consolas"
+                        font.family: root.font.family
                         font.pixelSize: 30
                         font.letterSpacing: 1
                     }

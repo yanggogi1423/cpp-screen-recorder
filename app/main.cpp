@@ -37,11 +37,14 @@ int main(int argc, char **argv) {
     app.setApplicationDisplayName(appinfo::name);
     app.setApplicationVersion(appinfo::version);
     app.setWindowIcon(QIcon("qrc:/assets/app-icon.png"));
-#ifdef Q_OS_WIN
-    // The offscreen Qt test platform does not enumerate the Windows font store.
-    QFontDatabase::addApplicationFont(qEnvironmentVariable("WINDIR") + "/Fonts/malgun.ttf");
-    app.setFont(QFont("Malgun Gothic"));
-#endif
+    // Embedded faces keep the UI consistent without installing a system font.
+    for (const auto *file : {":/fonts/D2Coding-Regular.ttf", ":/fonts/D2Coding-Bold.ttf"}) {
+        if (QFontDatabase::addApplicationFont(file) < 0) {
+            qCritical("Cannot load embedded D2Coding font: %s", file);
+            return 1;
+        }
+    }
+    app.setFont(QFont("D2Coding"));
     QQuickStyle::setStyle("Basic");
     const auto arguments = app.arguments();
     const bool testing =
@@ -545,6 +548,10 @@ int main(int argc, char **argv) {
                 controller.appInfo().value("version") != QCoreApplication::applicationVersion() ||
                 !menu || !menu->property("visible").toBool() || !folderButton ||
                 !folderButton->property("visible").toBool()) {
+                qWarning() << "UI metadata/controls:" << controller.settings().value("container")
+                           << controller.appInfo() << QCoreApplication::applicationVersion()
+                           << "menu" << (menu && menu->property("visible").toBool()) << "folder"
+                           << (folderButton && folderButton->property("visible").toBool());
                 app.exit(17);
                 return;
             }

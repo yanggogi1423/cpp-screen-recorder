@@ -4,6 +4,8 @@ FARecorder uses dynamically linked Qt 6.8.3 (Core, Gui, Qml, Quick, Quick Contro
 
 FFmpeg is run as a separate executable. The Windows development engine is the Gyan 9.0.2 essentials build, configured with GPL components including libx264. Preserve the build's LICENSE and README alongside any redistributed executable. Build information, source and build scripts are provided by https://www.gyan.dev/ffmpeg/builds/ ; upstream source is at https://ffmpeg.org/releases/ . The Qt Multimedia FFmpeg libraries are a separate Qt-provided playback dependency and keep their own notices.
 
+D2Coding 1.4.0 standard Regular and Bold fonts are embedded without modification. Copyright (c) 2015 NAVER Corporation; licensed under SIL Open Font License 1.1. The original copyright and full license are in `app/assets/fonts/OFL.txt`, embedded in the application and deployed as `licenses/D2Coding/OFL.txt` (also inside the macOS bundle). Official release: https://github.com/naver/d2-coding-font/releases/tag/VER1.4.0 . No system font installation is performed.
+
 Microsoft C++/WinRT tooling (project-local development dependency) is under the MIT license: https://github.com/microsoft/cppwinrt . Windows system libraries and macOS frameworks are supplied by their operating systems.
 
 No license is assigned to the project's original source in this initial development snapshot. A distribution policy and complete third-party source/notice bundle must be confirmed before a public binary release. CI artifacts are development builds, not signed product releases.
