@@ -114,6 +114,7 @@ public:
         session_=pool_.CreateCaptureSession(item_);session_.IsCursorCaptureEnabled(cursor);session_.StartCapture();
     }
     QImage latestFrame()override{std::lock_guard lock(mutex_);return latest_;}
+    void setCursor(bool enabled)override{std::lock_guard lock(mutex_);if(session_)session_.IsCursorCaptureEnabled(enabled);}
     void stop()override{
         stopped_=true;
         if(pool_)pool_.FrameArrived(frameToken_);

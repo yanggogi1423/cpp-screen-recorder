@@ -8,6 +8,7 @@ public:
     virtual ~VideoCapture()=default;
     virtual void start(const Source& source,const QRect& region,bool cursor,ErrorCallback error)=0;
     virtual QImage latestFrame()=0;
+    virtual void setCursor(bool enabled)=0;
     virtual void stop()=0;
 };
 class AudioCapture {

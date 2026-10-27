@@ -62,7 +62,11 @@ QVariantList RecorderController::audio()const{QVariantList out;for(const auto& s
 QVariantMap RecorderController::audioLevels()const{QVariantMap out;for(const auto& s:audioList_){const QString key=(s.kind==luma::AudioKind::Application?"app:":s.kind==luma::AudioKind::Microphone?"mic:":"system:")+s.id;out[key]=state_=="recording"?s.mix->peak.exchange(0.0f):0.0f;}return out;}
 QVariantMap RecorderController::settings()const{return {{"width",settings_.width},{"height",settings_.height},{"fps",settings_.fps},{"delay",settings_.delaySeconds},{"encoder",settings_.encoder},{"container",settings_.container},{"cursor",settings_.cursor},{"output",settings_.outputFolder}};}
 QString RecorderController::elapsed()const{const auto seconds=session_.frames()/std::max(1,settings_.fps);return QString("%1:%2:%3").arg(seconds/3600,2,10,QChar('0')).arg(seconds/60%60,2,10,QChar('0')).arg(seconds%60,2,10,QChar('0'));}
-void RecorderController::refresh(){if(state_!="idle")return;try{sourceList_=platform_->sources();audioList_=platform_->audioSources();emit sourcesChanged();}catch(const std::exception& ex){showMessage(QString::fromUtf8(ex.what()));}}
+void RecorderController::refresh(){if(state_!="idle")return;try{
+    sourceList_=platform_->sources();auto fresh=platform_->audioSources();
+    for(auto& next:fresh)for(const auto& previous:audioList_)if(next.id==previous.id&&next.kind==previous.kind){next.mix=previous.mix;break;}
+    audioList_=std::move(fresh);emit sourcesChanged();
+}catch(const std::exception& ex){showMessage(QString::fromUtf8(ex.what()));}}
 void RecorderController::attach(const luma::Source& source,QRect crop){
     try{
         auto capture=platform_->createVideoCapture();
@@ -84,13 +88,22 @@ void RecorderController::selectRegion(QString id,double x,double y,double width,
         if(crop.width()<16||crop.height()<16){showMessage("16 × 16 픽셀 이상의 영역을 선택해 주세요.");return;}attach(source,crop);return;
     }
 }
-void RecorderController::selectAudio(QString id,bool selected){if(state_!="idle")return;if(selected)selectedAudio_.insert(id);else selectedAudio_.remove(id);emit sourcesChanged();}
+void RecorderController::selectAudio(QString id,bool selected){
+    if(state_!="idle")return;
+    if(selected){
+        // System loopback already includes app audio; avoid accidental double capture.
+        if(id.startsWith("app:")){for(auto it=selectedAudio_.begin();it!=selectedAudio_.end();)if(it->startsWith("system:"))it=selectedAudio_.erase(it);else ++it;}
+        if(id.startsWith("system:")){for(auto it=selectedAudio_.begin();it!=selectedAudio_.end();)if(it->startsWith("app:"))it=selectedAudio_.erase(it);else ++it;}
+        selectedAudio_.insert(id);
+    }else selectedAudio_.remove(id);
+    emit sourcesChanged();
+}
 void RecorderController::setAudioGain(QString id,double gain){for(auto& s:audioList_){const QString key=(s.kind==luma::AudioKind::Application?"app:":s.kind==luma::AudioKind::Microphone?"mic:":"system:")+s.id;if(key==id)s.mix->gain=float(std::clamp(gain,0.0,2.0));}}
 void RecorderController::setAudioMuted(QString id,bool muted){for(auto& s:audioList_){const QString key=(s.kind==luma::AudioKind::Application?"app:":s.kind==luma::AudioKind::Microphone?"mic:":"system:")+s.id;if(key==id)s.mix->muted=muted;}}
 void RecorderController::setSetting(QString key,QVariant value){
     if(state_!="idle")return;
     if(key=="width")settings_.width=value.toInt();else if(key=="height")settings_.height=value.toInt();else if(key=="fps")settings_.fps=value.toInt();else if(key=="delay")settings_.delaySeconds=value.toInt();
-    else if(key=="encoder")settings_.encoder=value.toString();else if(key=="container")settings_.container=value.toString();else if(key=="cursor"){settings_.cursor=value.toBool();if(video_){video_->stop();video_.reset();emit sourceChanged();}}
+    else if(key=="encoder")settings_.encoder=value.toString();else if(key=="container")settings_.container=value.toString();else if(key=="cursor"){settings_.cursor=value.toBool();if(video_)video_->setCursor(settings_.cursor);}
     emit settingsChanged();saveSettings();
 }
 void RecorderController::setOutputFolder(QUrl url){if(state_!="idle"||!url.isLocalFile())return;settings_.outputFolder=url.toLocalFile();emit settingsChanged();saveSettings();}

@@ -23,7 +23,9 @@ jobs:
       - name: Windows build, tests and deployment
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./tools/build-windows.ps1 -Deploy
+        run: |
+          ./tools/setup-ffmpeg.ps1
+          ./tools/build-windows.ps1 -Deploy
       - name: macOS build and tests
         if: runner.os == 'macOS'
         run: |

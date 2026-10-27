@@ -49,6 +49,7 @@ SCContentFilter* filterFor(SCShareableContent* available,const Source& source){
 }
 class MacVideo final:public VideoCapture {
     SCStream* stream_=nil;
+    SCStreamConfiguration* config_=nil;
     LumaStreamOutput* output_=nil;
     dispatch_queue_t queue_=dispatch_queue_create("studio.luma.video",DISPATCH_QUEUE_SERIAL);
     std::mutex mutex_;
@@ -57,7 +58,7 @@ public:
     ~MacVideo()override{stop();}
     void start(const Source& source,const QRect& crop,bool cursor,ErrorCallback error)override{
         stop();auto available=content();auto filter=filterFor(available,source);
-        auto config=[[SCStreamConfiguration alloc]init];
+        auto config=[[SCStreamConfiguration alloc]init];config_=config;
         config.width=source.bounds.width();config.height=source.bounds.height();config.pixelFormat=kCVPixelFormatType_32BGRA;
         config.minimumFrameInterval=CMTimeMake(1,240);config.queueDepth=3;config.showsCursor=cursor;
         output_=[[LumaStreamOutput alloc]init];output_->onError=std::move(error);
@@ -75,6 +76,7 @@ public:
         startStream(stream_);
     }
     QImage latestFrame()override{std::lock_guard lock(mutex_);return image_;}
+    void setCursor(bool enabled)override{if(stream_){config_.showsCursor=enabled;[stream_ updateConfiguration:config_ completionHandler:^(NSError*){}];}}
     void stop()override{
         stopStream(stream_);dispatch_sync(queue_,^{});if(output_){output_->onSample={};output_->onError={};}stream_=nil;output_=nil;
         std::lock_guard lock(mutex_);image_={};

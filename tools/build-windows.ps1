@@ -21,4 +21,10 @@ if($LASTEXITCODE -ne 0){throw 'Tests failed.'}
 if($Deploy){
     & $cmake --install (Join-Path $root 'build') --prefix (Join-Path $root 'dist/Luma-Windows-x64')
     if($LASTEXITCODE -ne 0){throw 'Deployment failed.'}
+    $bundle=Join-Path $root 'dist/Luma-Windows-x64'
+    if(Test-Path -LiteralPath (Join-Path $root 'tools/ffmpeg/bin/ffmpeg.exe')){
+        Copy-Item -LiteralPath (Join-Path $root 'tools/ffmpeg/bin/ffmpeg.exe') -Destination (Join-Path $bundle 'bin/ffmpeg.exe') -Force
+        Copy-Item -LiteralPath (Join-Path $root 'tools/ffmpeg/LICENSE.txt') -Destination (Join-Path $bundle 'FFmpeg-LICENSE.txt') -Force
+    }
+    Copy-Item -LiteralPath (Join-Path $root 'THIRD_PARTY_NOTICES.md') -Destination $bundle -Force
 }

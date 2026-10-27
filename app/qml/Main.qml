@@ -19,6 +19,7 @@ ApplicationWindow {
     property int captureTestTick: -1
     palette.text: "#e5e4f0"; palette.window: "#191b24"; palette.button: "#252735"
     palette.base: "#13151d"; palette.buttonText: "#eeeefa"; palette.highlight: "#9270fa"
+    palette.windowText: "#e5e4f0"; palette.highlightedText: "#171220"
 
     component Caption: Text { color: "#9496aa"; font.pixelSize: 12 }
     component Heading: Text { color: "#f1f0fa"; font.pixelSize: 16; font.weight: Font.DemiBold }
@@ -49,7 +50,11 @@ ApplicationWindow {
             region.displayId = id; region.x = x; region.y = y; region.width = width; region.height = height; region.scaleFactor = scale; region.visible = true; region.requestActivate()
         }
         function onTrimFinished(file) { player.source = file; editor.open() }
-        function onStateChanged() { if (root.closeAfterSave && recorder.state === "idle") Qt.quit() }
+        function onStateChanged() {
+            if (root.closeAfterSave && recorder.state === "recording") recorder.toggleRecording()
+            if (root.closeAfterSave && recorder.state === "idle") Qt.quit()
+            if (recorder.state === "idle" && editor.opened && player.source.toString().length === 0) player.source = recorder.lastFile
+        }
     }
     FolderDialog { id: folderDialog; title: "녹화 저장 폴더"; onAccepted: recorder.setOutputFolder(selectedFolder) }
     FileDialog { id: recordingDialog; title: "편집할 녹화 영상"; nameFilters: ["영상 파일 (*.mkv *.mp4 *.mov)"]; onAccepted: recorder.openRecording(selectedFile) }
@@ -209,7 +214,7 @@ ApplicationWindow {
                                 }
                                 Text { visible: parent.count === 0; width: parent.width; anchors.centerIn: parent; text: "소스를 새로고침하면\n오디오 장치와 앱이 표시됩니다."; horizontalAlignment: Text.AlignHCenter; color: "#6e7186"; font.pixelSize: 11; lineHeight: 1.4 }
                             }
-                            Caption { text: "전체 소리와 앱 소리를 함께 선택하면 중복될 수 있어요."; font.pixelSize: 9; color: "#777b91" }
+                            Caption { Layout.fillWidth: true; text: "중복 방지: 전체 소리 또는 앱별 소리 중 하나를 선택합니다."; font.pixelSize: 9; color: "#9295a9"; wrapMode: Text.Wrap }
                         }
                     }
                     Panel {

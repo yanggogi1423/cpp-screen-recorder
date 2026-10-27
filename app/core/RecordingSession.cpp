@@ -119,7 +119,13 @@ void RecordingSession::run(Platform* platform,VideoCapture* video,Settings s,QLi
         QStringList args={"-hide_banner","-y","-i",rawVideo};
         for(const auto& entry:trackInfo)args<<"-i"<<entry.toObject()["file"].toString();
         args<<"-map"<<"0:v:0";
-        for(qsizetype i=0;i<sources.size();i++)args<<"-map"<<QString("%1:a:0").arg(i+1)<<QString("-metadata:s:a:%1").arg(i)<<"title="+sources[i].name<<QString("-filter:a:%1").arg(i)<<"apad";
+        const int offset=sources.size()>1?1:0;
+        if(offset){
+            QString graph;for(qsizetype i=0;i<sources.size();i++)graph+=QString("[%1:a:0]").arg(i+1);
+            graph+=QString("amix=inputs=%1:duration=longest:normalize=0,alimiter=limit=0.95:level=0:latency=1[mix]").arg(sources.size());
+            args<<"-filter_complex"<<graph<<"-map"<<"[mix]"<<"-metadata:s:a:0"<<"title=전체 믹스"<<"-disposition:a:0"<<"default";
+        }
+        for(qsizetype i=0;i<sources.size();i++)args<<"-map"<<QString("%1:a:0").arg(i+1)<<QString("-metadata:s:a:%1").arg(i+offset)<<"title="+sources[i].name<<QString("-filter:a:%1").arg(i+offset)<<"apad"<<QString("-disposition:a:%1").arg(i+offset)<<(i+offset==0?"default":"0");
         args<<"-c:v"<<"copy"<<"-c:a"<<"aac"<<"-b:a"<<"192k"<<"-t"<<QString::number(duration/1e9,'f',6);
         if(s.container=="mp4")args<<"-movflags"<<"+faststart";
         args<<output;
@@ -131,7 +137,7 @@ void RecordingSession::run(Platform* platform,VideoCapture* video,Settings s,QLi
         QFile manifest(QDir(folder).filePath("session.json"));
         if(manifest.open(QIODevice::WriteOnly))manifest.write(QJsonDocument(QJsonObject{
             {"version","0.1.0"},{"width",s.width},{"height",s.height},{"fps",s.fps},{"frames",double(frames_)},
-            {"duplicateFrames",double(duplicateFrames)},{"durationSeconds",duration/1e9},{"tracks",trackInfo},{"warning",warning}
+            {"duplicateFrames",double(duplicateFrames)},{"durationSeconds",duration/1e9},{"tracks",trackInfo},{"mixedPlaybackTrack",bool(offset)},{"warning",warning}
         }).toJson());
         emit finished(output,warning);
     }catch(const std::exception& ex){
