@@ -1156,8 +1156,16 @@ int main(int argc, char **argv) {
             }
             QMetaObject::invokeMethod(licenses, "close");
             auto *updates = root->findChild<QObject *>("updateDialog");
-            QMetaObject::invokeMethod(root->findChild<QObject *>("updateAction"), "trigger");
+            auto *updateAction = root->findChild<QObject *>("updateAction");
+            const bool invoked = QMetaObject::invokeMethod(updateAction, "trigger");
             if (!updates || !updates->property("visible").toBool()) {
+                qWarning() << "Update popup failed:" << "action" << bool(updateAction) << "invoked"
+                           << invoked << "enabled"
+                           << (updateAction && updateAction->property("enabled").toBool())
+                           << "popup" << bool(updates) << "size"
+                           << (updates ? updates->property("width") : QVariant())
+                           << (updates ? updates->property("height") : QVariant()) << "state"
+                           << updater.state();
                 app.exit(50);
                 return;
             }
@@ -1174,7 +1182,7 @@ int main(int argc, char **argv) {
                                                    {"updateDialog", "updates"}});
                 auto index = std::make_shared<int>(0);
                 auto timer = new QTimer(&app);
-                timer->setInterval(500);
+                timer->setInterval(1000);
                 QObject::connect(
                     timer, &QTimer::timeout, &app, [&, root, window, steps, index, timer] {
                         if (*index > 0)
@@ -1192,8 +1200,11 @@ int main(int argc, char **argv) {
                         }
                         QMetaObject::invokeMethod(popup, "open");
                         const auto name = steps->at(*index).second;
-                        QTimer::singleShot(200, &app, [window, name] {
-                            window->grabWindow().save("artifacts/ui-" + name + ".png");
+                        QTimer::singleShot(250, &app, [window, name, &app] {
+                            if (!window->grabWindow().save("artifacts/ui-" + name + ".png")) {
+                                qWarning() << "Cannot capture review popup" << name;
+                                app.exit(51);
+                            }
                         });
                         ++*index;
                     });

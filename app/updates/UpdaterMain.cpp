@@ -105,7 +105,8 @@ fs::path modulePath() {
     ensure(count > 0 && count < 32768, "Cannot locate updater");
     return fs::path(std::wstring(name, count));
 }
-int run(const fs::path &program, const std::vector<fs::path> &args, std::string *output = nullptr) {
+int run(const fs::path &program, const std::vector<fs::path> &args, std::string *output = nullptr,
+        const fs::path &workingDirectory = {}) {
     std::wstring command = quote(program.wstring());
     for (const auto &arg : args)
         command += L" " + quote(arg.wstring());
@@ -120,8 +121,9 @@ int run(const fs::path &program, const std::vector<fs::path> &args, std::string 
     startup.hStdError = write;
     startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     PROCESS_INFORMATION process{};
-    const BOOL created = CreateProcessW(program.c_str(), command.data(), nullptr, nullptr, TRUE,
-                                        CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
+    const BOOL created = CreateProcessW(
+        program.c_str(), command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr,
+        workingDirectory.empty() ? nullptr : workingDirectory.c_str(), &startup, &process);
     CloseHandle(write);
     if (!created) {
         CloseHandle(read);
@@ -214,12 +216,15 @@ fs::path modulePath() {
 fs::path tarPath() {
     return "/usr/bin/tar";
 }
-int run(const fs::path &program, const std::vector<fs::path> &args, std::string *output = nullptr) {
+int run(const fs::path &program, const std::vector<fs::path> &args, std::string *output = nullptr,
+        const fs::path &workingDirectory = {}) {
     int handles[2];
     ensure(pipe(handles) == 0, "Cannot create extraction pipe");
     const auto child = fork();
     ensure(child >= 0, "Cannot start archive utility");
     if (child == 0) {
+        if (!workingDirectory.empty() && chdir(workingDirectory.c_str()) != 0)
+            _exit(126);
         close(handles[0]);
         dup2(handles[1], STDOUT_FILENO);
         dup2(handles[1], STDERR_FILENO);
@@ -323,7 +328,8 @@ bool inside(const fs::path &child, const fs::path &parent) {
 }
 void validateArchive(const fs::path &archive) {
     std::string listing;
-    ensure(run(tarPath(), {"-tf", archive}, &listing) == 0, "Cannot inspect update archive");
+    if (run(tarPath(), {"-tf", archive.filename()}, &listing, archive.parent_path()) != 0)
+        throw std::runtime_error("Cannot inspect update archive: " + listing.substr(0, 1024));
     std::istringstream entries(listing);
     std::string value;
     size_t count = 0;
@@ -337,7 +343,8 @@ void validateArchive(const fs::path &archive) {
     }
     ensure(count > 0, "Empty update archive");
     std::string details;
-    ensure(run(tarPath(), {"-tvf", archive}, &details) == 0, "Cannot inspect archive links");
+    ensure(run(tarPath(), {"-tvf", archive.filename()}, &details, archive.parent_path()) == 0,
+           "Cannot inspect archive links");
     std::istringstream descriptions(details);
     std::set<std::string> links;
     while (std::getline(descriptions, value)) {
@@ -442,7 +449,8 @@ void apply(const fs::path &archive, const fs::path &target, const std::string &d
     const auto token = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     const auto stage = root.parent_path() / pathFrom(".FARecorder-update-" + token);
     ensure(fs::create_directory(stage), "Cannot create staging folder beside the app");
-    ensure(run(tarPath(), {"-xf", archive, "-C", stage}) == 0,
+    fs::copy_file(archive, stage / "payload.zip");
+    ensure(run(tarPath(), {"-xf", "payload.zip"}, nullptr, stage) == 0,
            "Cannot extract update; original app preserved");
     const auto fresh = stage / pathFrom(packageRoot);
     ensure(line(fresh / "farecorder-package.txt") == "FARecorder" &&

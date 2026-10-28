@@ -181,6 +181,11 @@ ApplicationWindow {
         onActivated: recorder.toggleRecording()
     }
     onClosing: function (close) {
+        if (updater.state === "preparing") {
+            close.accepted = false;
+            updateDialog.open();
+            return;
+        }
         if (recorder.state !== "idle") {
             close.accepted = false;
             recorder.setOptimized(false);
@@ -237,6 +242,7 @@ ApplicationWindow {
         }
         function onStateChanged() {
             if (recorder.state !== "idle") {
+                updateDialog.close();
                 helpDialog.close();
                 licenseDialog.close();
                 aboutDialog.close();
@@ -375,6 +381,11 @@ ApplicationWindow {
                 }
                 QuietMenu {
                     title: "도움말"
+                    Action {
+                        objectName: "updateAction"
+                        text: updater.state === "available" || updater.state === "ready" ? "업데이트 · " + updater.version : "업데이트…"
+                        onTriggered: updateDialog.open()
+                    }
                     Action {
                         objectName: "shortcutsAction"
                         text: "단축키"
@@ -535,6 +546,109 @@ ApplicationWindow {
         }
     }
 
+    Connections {
+        target: updater
+        function onReadyToRestart() {
+            root.close();
+        }
+        function onAvailable() {
+            if (root.idle && !recorder.hasUnsavedRecording && !editor.opened)
+                updateDialog.open();
+        }
+    }
+    QuietDialog {
+        id: updateDialog
+        objectName: "updateDialog"
+        anchors.centerIn: parent
+        width: Math.min(580, root.width - 48)
+        title: "FARecorder 업데이트"
+        height: Math.min(updater.notes.length > 0 ? 550 : 360, root.height - 48)
+        property bool busy: updater.state === "checking" || updater.state === "downloading" || updater.state === "preparing" || updater.state === "installing"
+        closePolicy: updater.state === "preparing" || updater.state === "installing" ? Popup.NoAutoClose : Popup.CloseOnEscape
+        contentItem: ColumnLayout {
+            spacing: 16
+            Caption {
+                text: "현재 버전 " + recorder.appInfo.version
+            }
+            Text {
+                Layout.fillWidth: true
+                text: updater.message
+                wrapMode: Text.Wrap
+                color: updater.state === "error" ? "#e4aaa0" : Theme.text
+                font.pixelSize: 13
+            }
+            ProgressBar {
+                visible: updater.state === "downloading"
+                Layout.fillWidth: true
+                value: updater.progress
+            }
+            ScrollView {
+                visible: updater.notes.length > 0
+                Layout.fillWidth: true
+                Layout.preferredHeight: 160
+                contentWidth: availableWidth
+                clip: true
+                TextArea {
+                    text: updater.notes
+                    textFormat: TextEdit.PlainText
+                    readOnly: true
+                    selectByMouse: true
+                    wrapMode: TextEdit.Wrap
+                    color: Theme.text
+                    font.pixelSize: 11
+                    background: Rectangle {
+                        color: Theme.panel
+                        radius: 10
+                    }
+                }
+            }
+            QuietCheckBox {
+                text: "시작할 때 새 버전 확인"
+                checked: updater.automatic
+                onToggled: updater.automatic = checked
+            }
+            QuietCheckBox {
+                text: "베타 버전 포함"
+                enabled: !updateDialog.busy && updater.state !== "ready"
+                checked: updater.beta
+                onToggled: updater.beta = checked
+            }
+            RowLayout {
+                ActionButton {
+                    text: "닫기"
+                    enabled: updater.state !== "preparing" && updater.state !== "installing"
+                    onClicked: updateDialog.close()
+                }
+                ActionButton {
+                    text: "릴리즈 페이지"
+                    onClicked: updater.openReleasePage()
+                }
+                Item {
+                    Layout.fillWidth: true
+                }
+                ActionButton {
+                    visible: updater.state === "downloading" || updater.state === "preparing"
+                    text: "취소"
+                    onClicked: updater.cancel()
+                }
+                ActionButton {
+                    visible: updater.state !== "downloading" && updater.state !== "ready"
+                    text: updater.state === "available" ? "다운로드" : "업데이트 확인"
+                    primary: true
+                    enabled: !updateDialog.busy && (updater.state !== "available" || updater.allowed)
+                    onClicked: updater.state === "available" ? updater.download() : updater.check()
+                }
+                ActionButton {
+                    objectName: "installUpdate"
+                    visible: updater.state === "ready"
+                    text: "설치하고 다시 시작"
+                    primary: true
+                    enabled: updater.allowed
+                    onClicked: updater.install()
+                }
+            }
+        }
+    }
     QuietDialog {
         id: aboutDialog
         objectName: "aboutDialog"
@@ -1218,8 +1332,8 @@ ApplicationWindow {
                         }
                         Select {
                             Layout.fillWidth: true
-                            model: Qt.platform.os === "osx" ? ["CPU · H.264", "Apple · VideoToolbox"] : ["CPU · H.264", "NVIDIA · NVENC", "Intel · QSV", "AMD · AMF"]
-                            property var ids: Qt.platform.os === "osx" ? ["libx264", "h264_videotoolbox"] : ["libx264", "h264_nvenc", "h264_qsv", "h264_amf"]
+                            model: Qt.platform.os === "osx" ? ["GPU 직접 · Apple", "CPU · H.264", "Apple · FFmpeg"] : ["GPU 직접 · Windows", "CPU · H.264", "NVIDIA · FFmpeg", "Intel · FFmpeg", "AMD · FFmpeg"]
+                            property var ids: Qt.platform.os === "osx" ? ["native_gpu", "libx264", "h264_videotoolbox"] : ["native_gpu", "libx264", "h264_nvenc", "h264_qsv", "h264_amf"]
                             currentIndex: Math.max(0, ids.indexOf(recorder.settings.encoder))
                             enabled: root.idle
                             onActivated: recorder.setSetting("encoder", ids[currentIndex])

@@ -33,6 +33,13 @@ jobs:
           cmake --build build --parallel 3
           ctest --test-dir build --output-on-failure
           cmake --install build --prefix dist/FARecorder-macOS
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FARecorder-${{ runner.os }}-test-diagnostics
+          path: build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
       - name: Upload development build
         uses: actions/upload-artifact@v4
         with:

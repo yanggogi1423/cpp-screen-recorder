@@ -11,6 +11,9 @@
 #include <QDesktopServices>
 #include <QUuid>
 #include <QTimer>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 UpdateManager::UpdateManager(bool startup, QObject *parent) : QObject(parent) {
     QSettings settings;
@@ -232,7 +235,18 @@ bool UpdateManager::install() {
     const QStringList args{
         "--apply",       archive_,         root.absolutePath(),
         release_.digest, release_.version, QString::number(QCoreApplication::applicationPid())};
-    if (!QProcess::startDetached(helper, args, directory_, &child)) {
+    QProcess starter;
+    starter.setProgram(helper);
+    starter.setArguments(args);
+    starter.setWorkingDirectory(directory_);
+#ifdef Q_OS_WIN
+    starter.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *arguments) {
+        arguments->flags = (arguments->flags & ~CREATE_NEW_CONSOLE) | CREATE_NO_WINDOW;
+        arguments->startupInfo->dwFlags |= STARTF_USESHOWWINDOW;
+        arguments->startupInfo->wShowWindow = SW_HIDE;
+    });
+#endif
+    if (!starter.startDetached(&child)) {
         setState("error", "업데이트 도우미를 시작하지 못했습니다.");
         return false;
     }
