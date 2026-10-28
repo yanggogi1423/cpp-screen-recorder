@@ -777,10 +777,31 @@ int main(int argc, char **argv) {
                     return;
                 }
                 controller.setAudioMuted("mic:fixture-mic", false);
-                auto *headset = root->findChild<QObject *>("source-option-mic:fixture-headset");
-                auto *speaker = root->findChild<QObject *>("source-option-system:fixture-speaker");
-                auto *discord = root->findChild<QObject *>("source-option-app:fixture-discord");
+                auto *micChoices = root->findChild<QObject *>("microphoneChoices");
+                auto *computerChoices = root->findChild<QObject *>("computerChoices");
+                QMetaObject::invokeMethod(micChoices, "open");
+                QMetaObject::invokeMethod(computerChoices, "open");
+                QCoreApplication::processEvents();
+                std::function<QQuickItem *(QQuickItem *, const QString &)> findVisual =
+                    [&](QQuickItem *parent, const QString &name) -> QQuickItem * {
+                    if (parent->objectName() == name)
+                        return parent;
+                    for (auto *child : parent->childItems())
+                        if (auto *found = findVisual(child, name))
+                            return found;
+                    return nullptr;
+                };
+                // Repeater delegates belong to the visual tree, not necessarily
+                // to the root's QObject ownership tree.
+                auto *headset =
+                    findVisual(window->contentItem(), "source-option-mic:fixture-headset");
+                auto *speaker =
+                    findVisual(window->contentItem(), "source-option-system:fixture-speaker");
+                auto *discord =
+                    findVisual(window->contentItem(), "source-option-app:fixture-discord");
                 if (!headset || !speaker || !discord) {
+                    qWarning() << "Source choices were not created" << headset << speaker
+                               << discord;
                     app.exit(43);
                     return;
                 }
@@ -806,6 +827,8 @@ int main(int argc, char **argv) {
                     app.exit(46);
                     return;
                 }
+                QMetaObject::invokeMethod(micChoices, "close");
+                QMetaObject::invokeMethod(computerChoices, "close");
                 auto *tabs = root->findChild<QObject *>("mixerTabs");
                 if (!tabs || tabs->property("count").toInt() != 2) {
                     app.exit(37);
