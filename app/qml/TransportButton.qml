@@ -19,8 +19,7 @@ Button {
     }
     contentItem: Image {
         source: "qrc:/assets/" + control.symbol + ".png"
-        sourceSize.width: control.large ? 96 : 48
-        sourceSize.height: sourceSize.width
+        sourceSize: Qt.size(control.large ? 96 : 48, control.large ? 96 : 48)
         fillMode: Image.PreserveAspectFit
         smooth: true
         mipmap: true

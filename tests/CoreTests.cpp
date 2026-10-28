@@ -3,6 +3,7 @@
 #include "core/AudioCheck.h"
 #include "core/SessionTimeline.h"
 #include "core/RegionGeometry.h"
+#include "core/RecordingFiles.h"
 #include <QCoreApplication>
 #include <QDataStream>
 #include <QFile>
@@ -105,6 +106,44 @@ int main(int argc, char **argv) {
         require(qFromLittleEndian<qint16>(packet.pcm.constData()) == 32767,
                 "gain clipping overflow");
         QTemporaryDir dir;
+        const auto sourceFile = dir.filePath("source.mp4");
+        const auto targetFile = dir.filePath("saved.mp4");
+        const QByteArray originalBytes(1024 * 128, 'a');
+        QFile sourceOutput(sourceFile);
+        require(sourceOutput.open(QIODevice::WriteOnly) &&
+                    sourceOutput.write(originalBytes) == originalBytes.size(),
+                "save fixture failed");
+        sourceOutput.close();
+        require(luma::saveRecordingCopy(sourceFile, sourceFile, false).file == sourceFile,
+                "saving to the current file should preserve it");
+        require(luma::saveRecordingCopy(sourceFile, targetFile, false).file == targetFile,
+                "save-as failed");
+        QFile savedFile(targetFile);
+        require(savedFile.open(QIODevice::ReadOnly) && savedFile.readAll() == originalBytes,
+                "save-as changed the recording");
+        savedFile.close();
+        require(sourceOutput.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
+                    sourceOutput.write("replacement") == 11,
+                "overwrite fixture failed");
+        sourceOutput.close();
+        require(luma::saveRecordingCopy(sourceFile, targetFile, false).needsOverwrite,
+                "existing destination must require confirmation");
+        require(savedFile.open(QIODevice::ReadOnly) && savedFile.readAll() == originalBytes,
+                "unconfirmed save changed the destination");
+        savedFile.close();
+        require(luma::saveRecordingCopy(sourceFile, targetFile, true).file == targetFile,
+                "confirmed replacement failed");
+        require(savedFile.open(QIODevice::ReadOnly) && savedFile.readAll() == "replacement",
+                "confirmed replacement has wrong bytes");
+        savedFile.close();
+        require(!luma::saveRecordingCopy(sourceFile, dir.filePath("missing/file.mp4"), false)
+                        .error.isEmpty() &&
+                    QFileInfo(sourceFile).exists(),
+                "failed save must preserve the source");
+        require(luma::estimatedRecordingBytes(1000, 60, 30, 0) == 1000 &&
+                    luma::estimatedRecordingBytes(1000, 60, 30, 1) == 49000 &&
+                    luma::estimatedRecordingBytes(1000, 60, 30, 2) == 145000,
+                "file estimate must count independent audio and default mix exactly once");
         const auto file = dir.filePath("audio.wav");
         const auto origin = luma::clockNs();
         {

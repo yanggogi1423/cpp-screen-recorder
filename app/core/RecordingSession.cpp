@@ -1,5 +1,6 @@
 #include "RecordingSession.h"
 #include "WaveWriter.h"
+#include "RecordingFiles.h"
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -100,6 +101,7 @@ void RecordingSession::start(Platform *platform, VideoCapture *video, const Sett
         thread_.join();
     stop_ = false;
     frames_ = 0;
+    estimatedBytes_ = 0;
     thread_ = std::thread([=, this] { run(platform, video, settings, sources); });
 }
 void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
@@ -133,7 +135,12 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
         QFile log(QDir(folder).filePath("encoder.log"));
         log.open(QIODevice::WriteOnly);
         encoder.setProgram(ffmpeg);
-        encoder.setArguments(videoArguments(s, inputSize, rawVideo));
+        auto arguments = videoArguments(s, inputSize, rawVideo);
+        arguments.removeLast();
+        // Flush the recovery Matroska once per second so live size reflects
+        // encoded data instead of remaining at the header for several seconds.
+        arguments << "-cluster_time_limit" << "1000" << "-flush_packets" << "1" << rawVideo;
+        encoder.setArguments(arguments);
         encoder.start();
         if (!encoder.waitForStarted(5000))
             throw std::runtime_error(encoder.errorString().toStdString());
@@ -226,6 +233,9 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
                 tail = (tail + line).right(5000);
             }
             frames_++;
+            if (frames_ % s.fps == 0)
+                estimatedBytes_ = estimatedRecordingBytes(QFileInfo(rawVideo).size(), frames_,
+                                                          s.fps, int(sources.size()));
             const auto line = encoder.readAllStandardError();
             log.write(line);
             tail = (tail + line).right(5000);
@@ -257,6 +267,8 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
             throw std::runtime_error(("영상 저장에 실패했습니다. encoder.log를 확인해 주세요.\n" +
                                       QString::fromUtf8(tail))
                                          .toStdString());
+        estimatedBytes_ = estimatedRecordingBytes(QFileInfo(rawVideo).size(), frames_, s.fps,
+                                                  int(sources.size()));
         const auto output = QDir(folder).filePath("recording." + s.container);
         QStringList args = {"-hide_banner", "-y", "-i", rawVideo};
         for (const auto &entry : trackInfo)

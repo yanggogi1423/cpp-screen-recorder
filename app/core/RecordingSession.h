@@ -20,6 +20,9 @@ class RecordingSession : public QObject {
     qint64 frames() const {
         return frames_.load();
     }
+    qint64 estimatedBytes() const {
+        return estimatedBytes_.load();
+    }
     void setPaused(bool value) {
         timeline_.setPaused(value);
     }
@@ -40,6 +43,7 @@ class RecordingSession : public QObject {
     std::thread thread_;
     std::atomic<bool> stop_{false};
     std::atomic<qint64> frames_{0};
+    std::atomic<qint64> estimatedBytes_{0};
     SessionTimeline timeline_;
 };
 } // namespace luma

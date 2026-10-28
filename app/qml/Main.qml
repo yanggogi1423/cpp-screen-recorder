@@ -11,6 +11,47 @@ ApplicationWindow {
     property bool optimized: recorder.optimized
     property rect normalBounds: Qt.rect(0, 0, 780, 780)
     property bool restoreMaximized: false
+    property bool changingGeometry: false
+    function rememberNormalBounds() {
+        Qt.callLater(function () {
+            if (!root.changingGeometry && !root.optimized && root.visibility === Window.Windowed)
+                root.normalBounds = Qt.rect(root.x, root.y, root.width, root.height);
+        });
+    }
+    onXChanged: rememberNormalBounds()
+    onYChanged: rememberNormalBounds()
+    onWidthChanged: rememberNormalBounds()
+    onHeightChanged: rememberNormalBounds()
+    function restoreWindow() {
+        var bounds = normalBounds;
+        changingGeometry = true;
+        showNormal();
+        width = Math.min(bounds.width, desktopWidth - 40);
+        height = Math.min(bounds.height, desktopHeight - 72);
+        x = bounds.x;
+        y = bounds.y;
+        Qt.callLater(function () {
+            root.changingGeometry = false;
+        });
+    }
+    function toggleMaximized() {
+        if (visibility === Window.Maximized) {
+            restoreWindow();
+        } else {
+            normalBounds = Qt.rect(x, y, width, height);
+            showMaximized();
+        }
+    }
+    function moveWindow(point) {
+        if (visibility === Window.Maximized) {
+            var globalPoint = contentItem.mapToGlobal(point);
+            var fraction = point.x / width;
+            restoreWindow();
+            x = globalPoint.x - width * fraction;
+            y = globalPoint.y - Math.min(point.y, 22);
+        }
+        startSystemMove();
+    }
     property int previewScreenWidth: 0
     property int previewScreenHeight: 0
     property int desktopWidth: previewScreenWidth || Screen.width
@@ -44,10 +85,12 @@ ApplicationWindow {
     }
     onOptimizedChanged: {
         if (optimized) {
+            changingGeometry = true;
             restoreMaximized = visibility === Window.Maximized;
+            if (!restoreMaximized)
+                normalBounds = Qt.rect(x, y, width, height);
             if (restoreMaximized)
                 showNormal();
-            normalBounds = Qt.rect(x, y, width, height);
             // Let the minimum-size bindings update before shrinking the window.
             Qt.callLater(function () {
                 if (root.optimized) {
@@ -56,12 +99,16 @@ ApplicationWindow {
                 }
             });
         } else {
+            changingGeometry = true;
             width = Math.min(normalBounds.width, desktopWidth - 40);
             height = Math.min(normalBounds.height, desktopHeight - 72);
             x = normalBounds.x;
             y = normalBounds.y;
             if (restoreMaximized)
                 showMaximized();
+            Qt.callLater(function () {
+                root.changingGeometry = false;
+            });
         }
     }
 
@@ -146,6 +193,16 @@ ApplicationWindow {
             testPlayer.stop();
             editor.open();
         }
+        function onRecordingReady() {
+            if (!root.closeAfterSave)
+                recordingSave.prepare();
+        }
+        function onRecordingSaved() {
+            recordingSave.close();
+        }
+        function onOverwriteRequested() {
+            recordingOverwrite.open();
+        }
         function onRegionRequested(id, x, y, width, height, scale) {
             region.displayId = id;
             region.x = x;
@@ -157,8 +214,14 @@ ApplicationWindow {
             region.requestActivate();
         }
         function onTrimFinished(file) {
-            player.source = file;
-            editor.open();
+            if (editor.returnToSave) {
+                editor.returnToSave = false;
+                editor.close();
+                recordingSave.open();
+            } else {
+                player.source = file;
+                editor.open();
+            }
         }
         function onStateChanged() {
             if (recorder.state !== "idle") {
@@ -171,6 +234,7 @@ ApplicationWindow {
             if (["preparing", "checking", "countdown", "starting", "recording"].indexOf(recorder.state) >= 0) {
                 saveChoice.close();
                 editor.close();
+                recordingSave.close();
             }
             if (root.closeAfterSave && root.activeRecording)
                 recorder.toggleRecording();
@@ -323,9 +387,14 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 MouseArea {
+                    objectName: "titlebarDrag"
                     anchors.fill: parent
-                    onPressed: root.startSystemMove()
-                    onDoubleClicked: root.visibility === Window.Maximized ? root.showNormal() : root.showMaximized()
+                    onDoubleClicked: root.toggleMaximized()
+                    DragHandler {
+                        target: null
+                        onActiveChanged: if (active)
+                            root.moveWindow(centroid.scenePosition)
+                    }
                 }
             }
             IconButton {
@@ -336,11 +405,12 @@ ApplicationWindow {
                 onClicked: root.showMinimized()
             }
             IconButton {
+                objectName: "maximizeButton"
                 visible: Qt.platform.os === "windows"
                 implicitWidth: 38
                 symbol: root.visibility === Window.Maximized ? "restore" : "maximize"
                 text: root.visibility === Window.Maximized ? "이전 크기" : "최대화"
-                onClicked: root.visibility === Window.Maximized ? root.showNormal() : root.showMaximized()
+                onClicked: root.toggleMaximized()
             }
             IconButton {
                 visible: Qt.platform.os === "windows"
@@ -353,12 +423,21 @@ ApplicationWindow {
         }
     }
     Rectangle {
+        id: compactContent
         objectName: "compactContent"
         visible: root.optimized
         anchors.fill: parent
         color: "#191919"
         border.color: "#3b3b3b"
         radius: Qt.platform.os === "windows" ? 10 : 0
+        // Behind the controls: every unoccupied pixel can move the window.
+        MouseArea {
+            objectName: "compactDrag"
+            anchors.fill: parent
+            onPressed: function (mouse) {
+                root.moveWindow(Qt.point(mouse.x, mouse.y));
+            }
+        }
         // Moving pixels in the self-capture fixture verify fresh WGC frames.
         Rectangle {
             visible: root.captureTestTick >= 0
@@ -388,15 +467,19 @@ ApplicationWindow {
                         font.pixelSize: 10
                     }
                 }
-                Text {
-                    text: recorder.elapsed
-                    color: "#f0f0f0"
-                    font.family: root.font.family
-                    font.pixelSize: 27
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    onPressed: root.startSystemMove()
+                RowLayout {
+                    spacing: 8
+                    Text {
+                        text: recorder.elapsed
+                        color: Theme.text
+                        font.pixelSize: 24
+                    }
+                    Caption {
+                        objectName: "compactSize"
+                        text: "약 " + recorder.estimatedSize
+                        font.pixelSize: 10
+                        Accessible.name: "예상 파일 크기 " + recorder.estimatedSize
+                    }
                 }
             }
             TransportButton {
@@ -623,7 +706,7 @@ ApplicationWindow {
                         wrapMode: Text.Wrap
                         textFormat: Text.RichText
                         lineHeight: 1.8
-                        text: helpTabs.currentIndex === 1 ? "<b>화면 선택</b><br>화면과 창 목록은 자동으로 갱신됩니다. 대상을 고른 뒤 연결하세요. 오른쪽 패널 아이콘에서 상세 설정을 엽니다.<br><br><b>영역 녹화</b><br>영역 선택 후 드래그하면 선택한 픽셀 크기로 저장합니다. 녹화·일시정지 중에도 손잡이나 테두리를 옮길 수 있습니다. 이동 범위는 같은 디스플레이 내부입니다.<br><br><b>녹화와 저장</b><br>첫 녹화 또는 설정 변경 시 실제 인코딩을 검사한 뒤 시작합니다. 녹화 중에는 작은 화면으로 바뀌며 화살표로 원래 화면에 돌아올 수 있습니다. 멈춘 시간은 영상과 소리에서 제외됩니다.<br><br><b>저장 위치 · 편집</b><br>파일 메뉴나 하단 폴더 버튼에서 저장 폴더를 고릅니다. 기본 형식은 MP4입니다. 편집 저장 시 새 파일과 원본 덮어쓰기를 선택합니다. 복구용 원본 영상과 독립 WAV가 세션 폴더에 남습니다." : "<b>녹음할 소리 선택</b><br>마이크와 컴퓨터 소리 선택기를 눌러 실제 장치나 앱을 고릅니다. 처음에는 사용 안 함 상태입니다. 전체 출력 장치와 앱별 소리는 중복 선택하지 않습니다.<br><br><b>녹화용 믹서</b><br>상세 패널의 마이크 / 컴퓨터 탭에서 각각 음량과 음소거를 조절합니다. 운영체제의 음량 설정은 바꾸지 않습니다. 녹화 중에는 기존 소리의 음량·음소거만 바꿀 수 있습니다. 음소거로 저장한 구간은 나중에 복원할 수 없습니다.<br><br><b>소리 확인</b><br>소리 테스트는 선택한 소리를 5초 동안 녹음합니다. 샘플 듣기를 직접 누른 경우에만 소리를 재생합니다. 앱이 목록에 없으면 해당 앱에서 소리를 재생해 주세요. 연결이 끊긴 장치는 선택이 해제됩니다.<br><br><b>장치와 권한</b><br>마이크·화면 녹화 권한이 필요할 수 있습니다. macOS 마이크는 현재 시스템 기본 입력을 사용합니다."
+                        text: helpTabs.currentIndex === 1 ? "<b>화면 선택</b><br>화면과 창 목록은 자동으로 갱신됩니다. 대상을 고른 뒤 연결하세요. 오른쪽 패널 아이콘에서 상세 설정을 엽니다.<br><br><b>영역 녹화</b><br>영역 선택 후 드래그하면 선택한 픽셀 크기로 저장합니다. 녹화·일시정지 중에도 손잡이나 테두리를 옮길 수 있습니다. 이동 범위는 같은 디스플레이 내부입니다.<br><br><b>녹화와 저장</b><br>첫 녹화 또는 설정 변경 시 실제 인코딩을 검사한 뒤 시작합니다. 녹화 중에는 작은 화면으로 바뀌며 화살표로 원래 화면에 돌아올 수 있습니다. 멈춘 시간은 영상과 소리에서 제외됩니다. 버튼 밖의 빈 공간은 어디서든 드래그할 수 있습니다. 타이머 옆의 용량은 현재까지의 영상과 최종 AAC 트랙에 대한 예상 파일 크기입니다. RAM 사용량이나 복구 원본을 합친 디스크 점유량이 아니며, 인코더 버퍼와 헤더 때문에 최종 크기와 차이가 있습니다.<br><br><b>저장 위치 · 편집</b><br>파일 메뉴나 하단 폴더 버튼에서 저장 폴더를 고릅니다. 기본 형식은 MP4입니다. 녹화 종료 후 저장 창에서 이름과 위치를 정하고, 필요한 경우 편집을 엽니다. 편집을 닫으면 저장 창으로 돌아옵니다. 같은 이름의 파일은 덮어쓰기를 확인합니다. 나중에 저장해도 세션 폴더의 자동 저장 파일은 유지됩니다. 편집본은 새 파일 또는 원본 덮어쓰기를 선택합니다. 복구용 원본 영상과 독립 WAV가 세션 폴더에 남습니다." : "<b>녹음할 소리 선택</b><br>마이크와 컴퓨터 소리 선택기를 눌러 실제 장치나 앱을 고릅니다. 처음에는 사용 안 함 상태입니다. 전체 출력 장치와 앱별 소리는 중복 선택하지 않습니다.<br><br><b>녹화용 믹서</b><br>상세 패널의 마이크 / 컴퓨터 탭에서 각각 음량과 음소거를 조절합니다. 운영체제의 음량 설정은 바꾸지 않습니다. 녹화 중에는 기존 소리의 음량·음소거만 바꿀 수 있습니다. 음소거로 저장한 구간은 나중에 복원할 수 없습니다.<br><br><b>소리 확인</b><br>소리 테스트는 선택한 소리를 5초 동안 녹음합니다. 샘플 듣기를 직접 누른 경우에만 소리를 재생합니다. 앱이 목록에 없으면 해당 앱에서 소리를 재생해 주세요. 연결이 끊긴 장치는 선택이 해제됩니다.<br><br><b>장치와 권한</b><br>마이크·화면 녹화 권한이 필요할 수 있습니다. macOS 마이크는 현재 시스템 기본 입력을 사용합니다."
                     }
                 }
             }
@@ -954,11 +1037,17 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 spacing: 12
                 Text {
+                    objectName: "recordingTimer"
+                    visible: root.activeRecording
                     text: recorder.elapsed
                     color: Theme.text
                     font.pixelSize: 30
                     font.family: root.font.family
                     font.letterSpacing: 0
+                }
+                Caption {
+                    visible: root.activeRecording
+                    text: "약 " + recorder.estimatedSize
                 }
                 Item {
                     Layout.fillWidth: true
@@ -1013,6 +1102,7 @@ ApplicationWindow {
                             recording: "녹화 중",
                             paused: "일시정지",
                             saving: "저장 중",
+                            exporting: "저장 중",
                             editing: "편집 중"
                         })[recorder.state] || recorder.state
                 }
@@ -1367,13 +1457,133 @@ ApplicationWindow {
         }
     }
 
+    FolderDialog {
+        id: recordingFolder
+        title: "영상 저장 위치"
+        currentFolder: recordingSave.folder
+        onAccepted: recordingSave.folder = selectedFolder
+    }
+    QuietDialog {
+        id: recordingSave
+        objectName: "recordingSave"
+        property url folder
+        function prepare() {
+            folder = recorder.recordingFile.folder;
+            recordingName.text = recorder.recordingFile.name;
+            open();
+        }
+        anchors.centerIn: parent
+        width: Math.min(540, root.width - 48)
+        title: recorder.state === "exporting" ? "영상 저장 중…" : "녹화 저장"
+        closePolicy: root.idle ? Popup.CloseOnEscape : Popup.NoAutoClose
+        contentItem: ColumnLayout {
+            spacing: 16
+            Caption {
+                text: "파일 이름"
+            }
+            Field {
+                id: recordingName
+                objectName: "recordingName"
+                Layout.fillWidth: true
+                enabled: root.idle
+                selectByMouse: true
+            }
+            Caption {
+                text: "저장 위치"
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Text {
+                    Layout.fillWidth: true
+                    text: decodeURIComponent(recordingSave.folder.toString().replace(/^file:\/\/\//, ""))
+                    color: Theme.text
+                    font.pixelSize: 12
+                    elide: Text.ElideMiddle
+                }
+                ActionButton {
+                    text: "변경…"
+                    enabled: root.idle
+                    onClicked: recordingFolder.open()
+                }
+            }
+            Caption {
+                text: recorder.recordingFile.size
+            }
+            Text {
+                Layout.fillWidth: true
+                visible: recorder.message.length > 0
+                text: recorder.message
+                color: "#e4aaa0"
+                wrapMode: Text.Wrap
+                font.pixelSize: 12
+            }
+            RowLayout {
+                ActionButton {
+                    text: "나중에"
+                    enabled: root.idle
+                    onClicked: recordingSave.close()
+                }
+                Item {
+                    Layout.fillWidth: true
+                }
+                ActionButton {
+                    objectName: "editBeforeSave"
+                    text: "편집…"
+                    enabled: root.idle
+                    onClicked: {
+                        editor.returnToSave = true;
+                        recordingSave.close();
+                        editor.open();
+                    }
+                }
+                ActionButton {
+                    objectName: "saveRecording"
+                    text: recorder.state === "exporting" ? "저장 중…" : "저장"
+                    primary: true
+                    enabled: root.idle
+                    onClicked: {
+                        recorder.clearMessage();
+                        recorder.saveRecording(recordingSave.folder, recordingName.text);
+                    }
+                }
+            }
+        }
+    }
+    QuietDialog {
+        id: recordingOverwrite
+        objectName: "recordingOverwrite"
+        anchors.centerIn: parent
+        width: Math.min(440, root.width - 48)
+        title: "같은 이름의 파일을 덮어쓸까요?"
+        contentItem: RowLayout {
+            ActionButton {
+                objectName: "cancelRecordingOverwrite"
+                text: "취소"
+                onClicked: recordingOverwrite.close()
+            }
+            Item {
+                Layout.fillWidth: true
+            }
+            ActionButton {
+                objectName: "confirmRecordingOverwrite"
+                text: "덮어쓰기"
+                danger: true
+                onClicked: {
+                    recordingOverwrite.close();
+                    recorder.saveRecording(recordingSave.folder, recordingName.text, true);
+                }
+            }
+        }
+    }
     QuietDialog {
         id: editor
+        objectName: "editor"
+        property bool returnToSave: false
         anchors.centerIn: parent
         width: Math.min(root.width - 80, 1000)
         height: Math.min(root.height - 60, 800)
         modal: true
-        title: "녹화 완료 · 간단 편집"
+        title: "영상 편집"
         background: Rectangle {
             color: "#191919"
             radius: Theme.windowRadius
@@ -1388,6 +1598,10 @@ ApplicationWindow {
         onClosed: {
             player.stop();
             player.source = "";
+            if (returnToSave && root.idle) {
+                returnToSave = false;
+                recordingSave.open();
+            }
         }
         MediaPlayer {
             id: player

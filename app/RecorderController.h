@@ -1,6 +1,7 @@
 #pragma once
 #include "core/RecordingSession.h"
 #include "core/AudioCheck.h"
+#include "core/RecordingFiles.h"
 #include "GlobalHotkeys.h"
 #include "SourceWatcher.h"
 #include <QFutureWatcher>
@@ -43,6 +44,8 @@ class RecorderController final : public QObject {
     Q_PROPERTY(int previewRevision READ previewRevision NOTIFY previewChanged)
     Q_PROPERTY(int countdown READ countdown NOTIFY stateChanged)
     Q_PROPERTY(QString elapsed READ elapsed NOTIFY tick)
+    Q_PROPERTY(QString estimatedSize READ estimatedSize NOTIFY tick)
+    Q_PROPERTY(QVariantMap recordingFile READ recordingFile NOTIFY lastFileChanged)
     Q_PROPERTY(QUrl lastFile READ lastFile NOTIFY lastFileChanged)
     Q_PROPERTY(QString platformName READ platformName CONSTANT)
     Q_PROPERTY(bool encoderReady READ encoderReady CONSTANT)
@@ -92,6 +95,8 @@ class RecorderController final : public QObject {
         return countdown_;
     }
     QString elapsed() const;
+    QString estimatedSize() const;
+    QVariantMap recordingFile() const;
     QUrl lastFile() const {
         return QUrl::fromLocalFile(lastFile_);
     }
@@ -165,6 +170,7 @@ class RecorderController final : public QObject {
     void configureRegionTest(const luma::Source &, QRect crop);
     Q_INVOKABLE void openOutputFolder();
     Q_INVOKABLE void openRecording(QUrl file);
+    Q_INVOKABLE void saveRecording(QUrl folder, QString name, bool overwrite = false);
     Q_INVOKABLE void clearMessage();
     Q_INVOKABLE void exportTrim(double startSeconds, double endSeconds, bool overwrite);
   signals:
@@ -180,6 +186,9 @@ class RecorderController final : public QObject {
     void lastFileChanged();
     void regionRequested(QString displayId, int x, int y, int width, int height, double scale);
     void editorRequested();
+    void recordingReady();
+    void recordingSaved();
+    void overwriteRequested();
     void trimFinished(QUrl file);
     void closeAllowed();
     void encoderChanged();
@@ -216,6 +225,7 @@ class RecorderController final : public QObject {
     SourceWatcher sourceWatcher_;
     QTimer discoveryTimer_, discoveryDebounce_;
     QFutureWatcher<SourceSnapshot> sourceFuture_;
+    QFutureWatcher<luma::FileSaveResult> saveFuture_;
     bool automaticDiscovery_ = false;
     bool discoveryBlocked_ = false;
     std::unique_ptr<luma::VideoCapture> video_;

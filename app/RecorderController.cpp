@@ -15,6 +15,7 @@
 #include <QGuiApplication>
 #include <QMutexLocker>
 #include <QSaveFile>
+#include <QRegularExpression>
 #include <QScreen>
 #include <QSettings>
 #include <QStandardPaths>
@@ -135,8 +136,23 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
                 emit lastFileChanged();
                 if (!warning.isEmpty())
                     showMessage(warning);
-                emit editorRequested();
+                else
+                    clearMessage();
+                emit recordingReady();
             });
+    connect(&saveFuture_, &QFutureWatcher<luma::FileSaveResult>::finished, this, [this] {
+        const auto result = saveFuture_.result();
+        setState("idle");
+        if (result.needsOverwrite)
+            emit overwriteRequested();
+        else if (!result.error.isEmpty())
+            showMessage(result.error);
+        else {
+            lastFile_ = result.file;
+            emit lastFileChanged();
+            emit recordingSaved();
+        }
+    });
     connect(&session_, &luma::RecordingSession::failed, this,
             [this](QString error, QString folder) {
                 setState("idle");
@@ -353,8 +369,8 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
             });
     const auto args = QCoreApplication::arguments();
     automaticDiscovery_ = std::none_of(args.begin(), args.end(), [](const auto &arg) {
-        return QStringList{"--ui-smoke",  "--workflow-test", "--capture-test", "--region-test",
-                           "--edit-test", "--encoder-test",  "--settings-test"}
+        return QStringList{"--ui-smoke",  "--workflow-test", "--capture-test",  "--region-test",
+                           "--edit-test", "--encoder-test",  "--settings-test", "--window-test"}
             .contains(arg);
     });
     if (automaticDiscovery_) {
@@ -364,6 +380,7 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
     }
 }
 RecorderController::~RecorderController() {
+    saveFuture_.waitForFinished();
     sourceWatcher_.stop();
     discoveryTimer_.stop();
     discoveryDebounce_.stop();
@@ -385,6 +402,7 @@ void RecorderController::setState(QString value) {
     if (state_ != "recording" && state_ != "paused")
         setOptimized(false);
     emit stateChanged();
+    emit tick();
     if (automaticDiscovery_ && state_ == "idle")
         discoveryDebounce_.start();
 }
@@ -467,11 +485,23 @@ QVariantMap RecorderController::settings() const {
             {"cursor", settings_.cursor},   {"output", settings_.outputFolder}};
 }
 QString RecorderController::elapsed() const {
+    if (state_ != "recording" && state_ != "paused" && state_ != "saving")
+        return "00:00:00";
     const auto seconds = session_.frames() / std::max(1, settings_.fps);
     return QString("%1:%2:%3")
         .arg(seconds / 3600, 2, 10, QChar('0'))
         .arg(seconds / 60 % 60, 2, 10, QChar('0'))
         .arg(seconds % 60, 2, 10, QChar('0'));
+}
+QString RecorderController::estimatedSize() const {
+    return luma::recordingSizeText(session_.estimatedBytes());
+}
+QVariantMap RecorderController::recordingFile() const {
+    const QFileInfo file(lastFile_);
+    return {{"name", file.fileName()},
+            {"folder", QUrl::fromLocalFile(file.absolutePath())},
+            {"path", file.absoluteFilePath()},
+            {"size", luma::recordingSizeText(file.size())}};
 }
 void RecorderController::refresh() {
     if (state_ != "idle" || audioCheck_.active() || sourceFuture_.isRunning())
@@ -1007,6 +1037,25 @@ void RecorderController::openRecording(QUrl file) {
     lastFile_ = file.toLocalFile();
     emit lastFileChanged();
     emit editorRequested();
+}
+void RecorderController::saveRecording(QUrl folder, QString name, bool overwrite) {
+    if (state_ != "idle" || saveFuture_.isRunning())
+        return;
+    name = name.trimmed();
+    if (!folder.isLocalFile() || !QDir(folder.toLocalFile()).exists() || name.isEmpty() ||
+        name == "." || name == ".." || name.contains(QRegularExpression("[\\\\/:*?\"<>|]"))) {
+        showMessage("저장 위치와 파일 이름을 확인해 주세요.");
+        return;
+    }
+    const QFileInfo original(lastFile_);
+    if (!name.endsWith("." + original.suffix(), Qt::CaseInsensitive))
+        name += "." + original.suffix();
+    const auto target = QDir(folder.toLocalFile()).absoluteFilePath(name);
+    const auto source = lastFile_;
+    setState("exporting");
+    saveFuture_.setFuture(QtConcurrent::run([source, target, overwrite] {
+        return luma::saveRecordingCopy(source, target, overwrite);
+    }));
 }
 void RecorderController::exportTrim(double start, double end, bool overwrite) {
     if (state_ != "idle")

@@ -57,7 +57,8 @@ int main(int argc, char **argv) {
         arguments.contains("--ui-smoke") || arguments.contains("--capture-test") ||
         arguments.contains("--edit-test") || arguments.contains("--workflow-test") ||
         arguments.contains("--encoder-test") || arguments.contains("--settings-test") ||
-        arguments.contains("--region-test") || arguments.contains("--discovery-test");
+        arguments.contains("--region-test") || arguments.contains("--discovery-test") ||
+        arguments.contains("--window-test");
     if (testing) {
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(
@@ -187,6 +188,74 @@ int main(int argc, char **argv) {
     engine.loadFromModule("Luma", "Main");
     if (engine.rootObjects().isEmpty())
         return 1;
+    if (arguments.contains("--window-test")) {
+        auto *root = engine.rootObjects().first();
+        auto *window = qobject_cast<QQuickWindow *>(root);
+        auto fail = [&app](const char *error) {
+            qWarning("%s", error);
+            app.exit(45);
+        };
+        root->setProperty("previewScreenWidth", 1600);
+        root->setProperty("previewScreenHeight", 1000);
+        QTimer::singleShot(150, &app, [&, root, window] {
+            window->setGeometry(120, 80, 760, 680);
+            QTimer::singleShot(150, &app,
+                               [root] { QMetaObject::invokeMethod(root, "toggleMaximized"); });
+        });
+        QTimer::singleShot(600, &app,
+                           [root] { QMetaObject::invokeMethod(root, "toggleMaximized"); });
+        QTimer::singleShot(850, &app, [&, root, window, fail] {
+            if (window->visibility() != QWindow::Windowed || window->size() != QSize(760, 680)) {
+                fail("Maximize button did not restore the previous window size");
+                return;
+            }
+            QMetaObject::invokeMethod(root, "toggleMaximized");
+            QTimer::singleShot(200, &app, [root] {
+                QMetaObject::invokeMethod(root, "moveWindow", Q_ARG(QVariant, QPointF(300, 20)));
+            });
+        });
+        QTimer::singleShot(1300, &app, [&, root, window, fail] {
+            if (window->visibility() != QWindow::Windowed || window->size() != QSize(760, 680)) {
+                fail("Dragging a maximized titlebar did not restore the previous size");
+                return;
+            }
+            root->setProperty("optimized", true);
+        });
+        QTimer::singleShot(1600, &app, [&, root, window, fail] {
+            if (window->size() != QSize(400, 104)) {
+                fail("Compact mode has wrong bounds");
+                return;
+            }
+            int moves = 0;
+            // Inspect hit testing without invoking native movement: offscreen
+            // startSystemMove returns false, but the real QML MouseArea receives input.
+            auto *dragArea = root->findChild<QObject *>("compactDrag");
+            for (const QPointF point : {QPointF(3, 3), QPointF(200, 3), QPointF(397, 101)}) {
+                QMouseEvent press(QEvent::MouseButtonPress, point,
+                                  window->mapToGlobal(point.toPoint()), Qt::LeftButton,
+                                  Qt::LeftButton, Qt::NoModifier);
+                QCoreApplication::sendEvent(window, &press);
+                if (dragArea && dragArea->property("pressed").toBool())
+                    ++moves;
+                QMouseEvent release(QEvent::MouseButtonRelease, point,
+                                    window->mapToGlobal(point.toPoint()), Qt::LeftButton,
+                                    Qt::NoButton, Qt::NoModifier);
+                QCoreApplication::sendEvent(window, &release);
+            }
+            if (moves != 3) {
+                fail("Compact background margins do not receive dragging input");
+                return;
+            }
+            root->setProperty("optimized", false);
+            QTimer::singleShot(150, &app, [&, window, fail] {
+                if (window->size() != QSize(760, 680))
+                    fail("Compact restore lost the normal window bounds");
+                else
+                    app.exit(0);
+            });
+        });
+        QTimer::singleShot(6000, &app, [&] { app.exit(46); });
+    }
     if (arguments.contains("--region-test")) {
 #ifdef Q_OS_WIN
         QDir().mkpath("artifacts");
@@ -265,9 +334,67 @@ int main(int argc, char **argv) {
                         fail("Dragging while paused did not translate the crop");
                 });
                 QTimer::singleShot(1700, &app, [hotkey] { hotkey(GlobalHotkeys::PauseId); });
+                QTimer::singleShot(2450, &app, [&, fail] {
+                    if (controller.estimatedSize() == luma::recordingSizeText(0)) {
+                        fail("Live file estimate did not update from the encoded video");
+                        return;
+                    }
+                    auto *root = engine.rootObjects().first();
+                    auto *size = root->findChild<QQuickItem *>("compactSize");
+                    auto *pause = root->findChild<QQuickItem *>("compactPause");
+                    if (!size || !size->isVisible() ||
+                        size->mapToScene(QPointF(size->width(), 0)).x() >
+                            pause->mapToScene(QPointF()).x()) {
+                        fail("Compact size indicator overlaps the recording buttons");
+                        return;
+                    }
+                    qobject_cast<QQuickWindow *>(root)->grabWindow().save(
+                        "artifacts/recording-compact.png");
+                });
                 QTimer::singleShot(2700, &app, [hotkey] { hotkey(GlobalHotkeys::RecordId); });
             });
-        QObject::connect(&controller, &RecorderController::lastFileChanged, &app, [&] {
+        auto saveFlowStarted = std::make_shared<bool>(false);
+        QObject::connect(
+            &controller, &RecorderController::lastFileChanged, &app, [&, saveFlowStarted, fail] {
+                if (*saveFlowStarted)
+                    return;
+                *saveFlowStarted = true;
+                QTimer::singleShot(350, &app, [&, fail] {
+                    auto *root = engine.rootObjects().first();
+                    auto *dialog = root->findChild<QObject *>("recordingSave");
+                    auto *editor = root->findChild<QObject *>("editor");
+                    auto *timer = root->findChild<QObject *>("recordingTimer");
+                    if (!dialog->property("opened").toBool() ||
+                        editor->property("opened").toBool() ||
+                        timer->property("visible").toBool() || controller.elapsed() != "00:00:00") {
+                        fail("Stop must show saving first and hide/reset the idle timer");
+                        return;
+                    }
+                    qobject_cast<QQuickWindow *>(root)->grabWindow().save(
+                        "artifacts/recording-save.png");
+                    QMetaObject::invokeMethod(root->findChild<QObject *>("editBeforeSave"),
+                                              "clicked");
+                    QTimer::singleShot(350, &app, [&, root, editor, dialog, fail] {
+                        if (!editor->property("opened").toBool() ||
+                            dialog->property("opened").toBool()) {
+                            fail("The save dialog did not open the optional editor");
+                            return;
+                        }
+                        QMetaObject::invokeMethod(editor, "close");
+                        QTimer::singleShot(200, &app, [&, root, dialog, fail] {
+                            if (!dialog->property("opened").toBool()) {
+                                fail("Closing the editor did not return to saving");
+                                return;
+                            }
+                            root->findChild<QObject *>("recordingName")
+                                ->setProperty("text", "recording_saved.mp4");
+                            QMetaObject::invokeMethod(root->findChild<QObject *>("saveRecording"),
+                                                      "clicked");
+                        });
+                    });
+                });
+            });
+        QObject::connect(&controller, &RecorderController::recordingSaved, &app, [&] {
             QFile out("artifacts/region-result.json");
             out.open(QIODevice::WriteOnly);
             out.write(
@@ -275,6 +402,8 @@ int main(int argc, char **argv) {
                                           {"width", controller.settings().value("width").toInt()},
                                           {"height", controller.settings().value("height").toInt()},
                                           {"dragVerified", true},
+                                          {"saveFlowVerified", true},
+                                          {"idleTimerVerified", true},
                                           {"hotkeysVerified", controller.globalHotkeysAvailable()}})
                     .toJson());
             app.exit(0);
