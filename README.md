@@ -4,7 +4,7 @@
 
 A modern desktop recorder built with **C++20 + Qt 6 / QML**, with native capture backends for Windows and macOS.
 
-현재 **0.4.0 alpha 개발 중**입니다. 기능을 구현했다는 것과 실제 장비에서 검증했다는 것을 구분합니다. 최종 지원 상태와 테스트 증거는 [기능 점검표](docs/FEATURE_AUDIT.md)에 기록합니다. 아직 정식 릴리즈가 아닙니다.
+**0.4.0-beta.1 Windows 베타를 배포합니다.** [다운로드 및 변경 내용](https://github.com/yanggogi1423/cpp-screen-recorder/releases/tag/v0.4.0-beta.1). 기능을 구현했다는 것과 실제 장비에서 검증했다는 것을 구분합니다. 최종 지원 상태와 테스트 증거는 [기능 점검표](docs/FEATURE_AUDIT.md)에 기록합니다. 베타(pre-release)이며 정식 안정 버전은 아닙니다.
 
 ![간소화 화면](docs/images/main.png)
 
@@ -116,7 +116,7 @@ macOS 빌드/기본 테스트/배포는 CI에서 통과했습니다. 물리 Mac�
 
 현재 CPU 메모리를 거쳐 인코딩하므로 높은 해상도·FPS를 설정할 수 있어도 실제 처리 성능은 하드웨어에 따라 달라집니다. GPU 인코더는 호환 드라이버와 하드웨어가 필요합니다. HDR, 게임 후킹, 예약 종료, 웹캠/PIP, 주석, 노이즈 억제, 자동 업데이트는 아직 없습니다. 브라우저 탭별 소리나 한 프로세스 안의 통화 참여자별 소리 분리는 지원하지 않습니다.
 
-현재 버전은 보강·디버깅·UI 폴리싱을 거친 개발 프리뷰입니다. 물리 Mac 녹화와 장시간·고부하 인수 시험 후 정식 릴리즈를 진행합니다. 의존성 고지와 배포 정책은 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 확인하세요.
+현재 버전은 보강·디버깅·UI 폴리싱을 거친 Windows 베타입니다. 물리 Mac 녹화와 장시간·고부하 인수 시험 후 정식 릴리즈를 진행합니다. 의존성 고지와 배포 정책은 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
 ## 제품 정보
 
