@@ -11,8 +11,8 @@ TextField {
     font.pixelSize: 14
     leftPadding: 12
     background: Rectangle {
-        radius: 8
-        color: "#151515"
-        border.color: control.activeFocus ? "#bbbbbb" : "#3b3b3b"
+        radius: Theme.radius
+        color: Theme.field
+        border.color: control.activeFocus ? "#777777" : Theme.border
     }
 }

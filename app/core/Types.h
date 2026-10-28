@@ -30,12 +30,14 @@ struct Source {
     QRect bounds;
     quint32 processId = 0;
     QRect logicalBounds;
+    bool operator==(const Source &) const = default;
 };
 struct AudioSource {
     QString id, name, detail;
     AudioKind kind = AudioKind::Application;
     quint32 processId = 0;
     std::shared_ptr<AudioMix> mix = std::make_shared<AudioMix>();
+    bool operator==(const AudioSource &) const = default;
 };
 struct AudioPacket {
     QByteArray pcm; // 48 kHz, signed little-endian 16-bit stereo, interleaved

@@ -11,19 +11,38 @@ Rectangle {
             gain: 1,
             muted: false
         })
-    implicitHeight: 103
-    color: sourceData.selected ? "#252525" : "#191919"
-    border.color: sourceData.selected ? "#494949" : "#2b2b2b"
-    radius: 8
+    implicitHeight: 92
+    color: Theme.panel
+    border.color: sourceData.selected ? "#515151" : Theme.border
+    radius: Theme.radius
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 10
         spacing: 3
         RowLayout {
             CheckBox {
+                id: selected
+                implicitWidth: 26
+                implicitHeight: 28
                 checked: route.sourceData.selected
+                Accessible.name: route.sourceData.name
                 enabled: route.allowSelection
                 onToggled: recorder.selectAudio(route.sourceData.id, checked)
+                indicator: Rectangle {
+                    x: 3
+                    y: 6
+                    width: 15
+                    height: 15
+                    radius: 4
+                    color: selected.checked ? "#626262" : "transparent"
+                    border.color: "#777777"
+                    Text {
+                        anchors.centerIn: parent
+                        text: selected.checked ? "✓" : ""
+                        color: Theme.text
+                        font.pixelSize: 12
+                    }
+                }
             }
             ColumnLayout {
                 Layout.fillWidth: true
@@ -37,28 +56,55 @@ Rectangle {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: route.sourceData.kind === 0 ? "프로그램" : route.sourceData.kind === 1 ? "마이크" : "시스템 전체"
+                    visible: route.sourceData.kind === 2
+                    text: "출력 장치 전체"
                     color: "#999999"
                     font.pixelSize: 10
                 }
             }
-            ActionButton {
-                text: route.mix.muted ? "음소거됨" : "음소거"
-                implicitWidth: 68
+            IconButton {
+                text: route.sourceData.name + (route.mix.muted ? " 음소거 해제" : " 음소거")
+                symbol: route.mix.muted ? "muted" : "speaker"
+                implicitWidth: 28
                 implicitHeight: 28
-                font.pixelSize: 10
                 enabled: route.sourceData.selected && route.allowMix
                 onClicked: recorder.setAudioMuted(route.sourceData.id, !route.mix.muted)
             }
         }
         RowLayout {
             Slider {
+                id: gainSlider
+                Accessible.name: route.sourceData.name + " 녹화 음량"
+                implicitHeight: 24
                 Layout.fillWidth: true
                 from: 0
                 to: 2
                 value: route.mix.gain
                 enabled: route.sourceData.selected && route.allowMix
                 onMoved: recorder.setAudioGain(route.sourceData.id, value)
+                opacity: enabled ? 1 : 0.35
+                background: Rectangle {
+                    x: gainSlider.leftPadding
+                    y: gainSlider.topPadding + gainSlider.availableHeight / 2 - height / 2
+                    width: gainSlider.availableWidth
+                    height: 3
+                    radius: 2
+                    color: "#3c3c3c"
+                    Rectangle {
+                        width: gainSlider.visualPosition * parent.width
+                        height: parent.height
+                        radius: 2
+                        color: "#888888"
+                    }
+                }
+                handle: Rectangle {
+                    x: gainSlider.leftPadding + gainSlider.visualPosition * (gainSlider.availableWidth - width)
+                    y: gainSlider.topPadding + gainSlider.availableHeight / 2 - height / 2
+                    width: 12
+                    height: 12
+                    radius: 6
+                    color: gainSlider.pressed ? "#eeeeee" : "#bbbbbb"
+                }
             }
             Text {
                 Layout.preferredWidth: 35

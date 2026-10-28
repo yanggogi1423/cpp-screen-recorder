@@ -22,7 +22,7 @@ ApplicationWindow {
     visible: true
     flags: Qt.platform.os === "windows" ? Qt.Window | Qt.FramelessWindowHint : Qt.Window
     title: "FARecorder"
-    color: "#141414"
+    color: Qt.platform.os === "windows" ? "transparent" : Theme.window
     font.family: "D2Coding"
     palette.window: "#1c1c1c"
     palette.base: "#151515"
@@ -30,8 +30,8 @@ ApplicationWindow {
     palette.windowText: "#eeeeee"
     palette.buttonText: "#eeeeee"
     palette.button: "#292929"
-    palette.highlight: "#bbbbbb"
-    palette.highlightedText: "#111111"
+    palette.highlight: "#666666"
+    palette.highlightedText: "#eeeeee"
     property bool idle: recorder.state === "idle"
     property bool canChoose: idle && !recorder.audioTestActive
     property bool activeRecording: recorder.state === "recording" || recorder.state === "paused"
@@ -64,187 +64,67 @@ ApplicationWindow {
                 showMaximized();
         }
     }
-    property var selectedRoutes: recorder.audio.filter(function (a) {
-        return a.selected;
-    })
-    function kindRoutes(mic) {
-        return recorder.audio.filter(function (a) {
-            return mic ? a.kind === 1 : a.kind !== 1;
-        });
-    }
-    function kindSelected(mic) {
-        return selectedRoutes.filter(function (a) {
-            return mic ? a.kind === 1 : a.kind !== 1;
-        });
-    }
-    function setKind(mic, enabled) {
-        var chosen = kindSelected(mic);
-        if (activeRecording || recorder.audioTestActive) {
-            for (var i = 0; i < chosen.length; i++)
-                recorder.setAudioMuted(chosen[i].id, !enabled);
-            return;
-        }
-        if (!enabled) {
-            for (var j = 0; j < chosen.length; j++)
-                recorder.selectAudio(chosen[j].id, false);
-        } else {
-            if (chosen.length) {
-                for (var k = 0; k < chosen.length; k++)
-                    recorder.setAudioMuted(chosen[k].id, false);
-                return;
-            }
-            var all = kindRoutes(mic);
-            var target = all.find(function (a) {
-                return mic || a.kind === 2;
-            });
-            if (!target) {
-                recorder.refresh();
-                all = kindRoutes(mic);
-                target = all.find(function (a) {
-                    return mic || a.kind === 2;
-                });
-            }
-            if (target) {
-                recorder.selectAudio(target.id, true);
-                recorder.setAudioMuted(target.id, false);
-            }
-        }
-    }
-    function kindAudible(mic) {
-        return kindSelected(mic).some(function (a) {
-            return !(recorder.mixStates[a.id] || {}).muted;
-        });
-    }
-    function kindLevel(mic) {
-        var result = 0;
-        var a = kindSelected(mic);
-        for (var i = 0; i < a.length; i++)
-            result = Math.max(result, recorder.audioLevels[a[i].id] || 0);
-        return result;
-    }
 
+    property string displaySelection: ""
+    property string windowSelection: ""
+    property var selectedRoutes: recorder.audio.filter(a => a.selected)
+    function kindRoutes(mic) {
+        return recorder.audio.filter(a => mic ? a.kind === 1 : a.kind !== 1);
+    }
+    function restoreCombo(combo, stored, display) {
+        var list = display ? recorder.displays : recorder.windows;
+        var position = list.findIndex(a => a.id === stored);
+        if (!stored && list.length) {
+            position = 0;
+            if (display)
+                displaySelection = list[0].id;
+            else
+                windowSelection = list[0].id;
+        }
+        combo.currentIndex = position;
+    }
+    Component.onCompleted: recorder.configureWindowChrome(root)
+    onVisibilityChanged: Qt.callLater(function () {
+        recorder.configureWindowChrome(root);
+    })
+    background: Rectangle {
+        radius: root.visibility === Window.Maximized ? 0 : Theme.windowRadius
+        color: Qt.platform.os === "windows" ? "#f2191919" : Theme.window
+        border.color: root.visibility === Window.Maximized ? "transparent" : "#3b3b3b"
+    }
     component Caption: Text {
-        color: "#979797"
+        color: Theme.muted
         font.pixelSize: 11
     }
     component Heading: Text {
-        color: "#eeeeee"
+        color: Theme.text
         font.pixelSize: 14
         font.weight: Font.DemiBold
     }
-    component Select: ComboBox {
-        id: select
-        implicitHeight: 36
-        implicitWidth: 120
+    component Select: QuietCombo {}
+    component Segment: TabButton {
+        id: segment
+        implicitHeight: 32
         font.pixelSize: 12
-        leftPadding: 10
-        rightPadding: 28
-        background: Rectangle {
-            radius: 7
-            color: "#202020"
-            border.color: select.activeFocus ? "#aaaaaa" : "#383838"
-        }
         contentItem: Text {
-            text: select.displayText
-            color: "#e2e2e2"
-            font: select.font
+            text: segment.text
+            color: segment.checked ? Theme.text : Theme.muted
+            font: segment.font
+            horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-            leftPadding: 0
-            rightPadding: 0
         }
-        popup: Popup {
-            y: select.height + 4
-            width: select.width
-            padding: 5
-            implicitHeight: Math.min(contentItem.implicitHeight + 10, 300)
-            background: Rectangle {
-                color: "#262626"
-                radius: 8
-                border.color: "#4b4b4b"
-            }
-            contentItem: ListView {
-                clip: true
-                implicitHeight: contentHeight
-                model: select.popup.visible ? select.delegateModel : null
-                currentIndex: select.highlightedIndex
-                ScrollIndicator.vertical: ScrollIndicator {}
-            }
-        }
-        delegate: ItemDelegate {
-            required property var modelData
-            required property int index
-            width: select.width - 10
-            text: select.textRole ? modelData[select.textRole] : modelData
-            font: select.font
-            highlighted: select.highlightedIndex === index
-            palette.text: "#eeeeee"
+        background: Rectangle {
+            radius: 8
+            color: segment.down ? Theme.pressed : segment.hovered ? Theme.hover : segment.checked ? "#383838" : "transparent"
         }
     }
-    component AudioSwitch: Rectangle {
-        id: audioSwitch
-        property bool mic: false
-        Layout.fillWidth: true
-        implicitHeight: 63
-        color: "#1d1d1d"
-        radius: 8
-        border.color: "#333333"
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 10
-            spacing: 5
-            RowLayout {
-                Text {
-                    text: audioSwitch.mic ? "마이크" : "컴퓨터 소리"
-                    color: "#dddddd"
-                    font.pixelSize: 12
-                    Layout.fillWidth: true
-                }
-                Switch {
-                    id: audioToggle
-                    implicitHeight: 26
-                    implicitWidth: 42
-                    padding: 0
-                    indicator: Rectangle {
-                        width: 40
-                        height: 22
-                        radius: 11
-                        y: 2
-                        color: audioToggle.checked ? "#d4d4d4" : "#333333"
-                        border.color: "#5a5a5a"
-                        Rectangle {
-                            width: 16
-                            height: 16
-                            radius: 8
-                            y: 3
-                            x: audioToggle.checked ? 21 : 3
-                            color: audioToggle.checked ? "#202020" : "#8a8a8a"
-                            Behavior on x {
-                                NumberAnimation {
-                                    duration: 100
-                                }
-                            }
-                        }
-                    }
-                    checked: root.kindAudible(audioSwitch.mic)
-                    enabled: root.idle || ((root.activeRecording || recorder.audioTestActive) && root.kindSelected(audioSwitch.mic).length > 0)
-                    onToggled: root.setKind(audioSwitch.mic, checked)
-                }
-            }
-            Meter {
-                Layout.fillWidth: true
-                level: root.kindLevel(audioSwitch.mic)
-            }
-        }
-    }
-
     Shortcut {
-        sequence: "Ctrl+Shift+R"
+        sequence: "Ctrl+R"
         enabled: !recorder.globalHotkeysAvailable
         onActivated: recorder.toggleRecording()
     }
     Shortcut {
-        sequence: "Ctrl+Shift+P"
+        sequence: "Ctrl+P"
         enabled: !recorder.globalHotkeysAvailable
         onActivated: recorder.togglePause()
     }
@@ -281,13 +161,24 @@ ApplicationWindow {
             editor.open();
         }
         function onStateChanged() {
-            if (root.closeAfterSave && (recorder.state === "recording" || recorder.state === "paused"))
+            if (recorder.state !== "idle") {
+                helpDialog.close();
+                licenseDialog.close();
+                aboutDialog.close();
+                for (var i = 0; i < mainMenu.count; i++)
+                    mainMenu.menuAt(i).close();
+            }
+            if (["preparing", "checking", "countdown", "starting", "recording"].indexOf(recorder.state) >= 0) {
+                saveChoice.close();
+                editor.close();
+            }
+            if (root.closeAfterSave && root.activeRecording)
                 recorder.toggleRecording();
-            if (root.closeAfterSave && recorder.state === "idle")
+            if (root.closeAfterSave && root.idle)
                 Qt.quit();
-            if (recorder.state === "idle" && editor.opened && player.source.toString().length === 0)
+            if (root.idle && editor.opened && player.source.toString().length === 0)
                 player.source = recorder.lastFile;
-            if (recorder.state !== "idle")
+            if (!root.idle)
                 testPlayer.stop();
         }
     }
@@ -312,36 +203,121 @@ ApplicationWindow {
         }
     }
 
-    Rectangle {
+    Item {
         id: titlebar
         objectName: "titlebar"
         visible: !root.optimized
-        anchors.top: parent.top
         width: parent.width
-        height: 48
-        color: "#191919"
-        Rectangle {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 1
-            color: "#303030"
-        }
+        height: 44
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 16
-            anchors.rightMargin: 7
-            spacing: 9
+            anchors.leftMargin: 14
+            anchors.rightMargin: 5
+            spacing: 4
             Image {
                 source: "qrc:/assets/app-icon.png"
-                Layout.preferredWidth: 28
-                Layout.preferredHeight: 28
+                Layout.preferredWidth: 20
+                Layout.preferredHeight: 20
                 mipmap: true
             }
             Text {
                 text: "FARecorder"
-                color: "#ededed"
-                font.pixelSize: 14
-                font.weight: Font.DemiBold
+                color: "#c2c2c2"
+                font.pixelSize: 11
+                Layout.leftMargin: 5
+                Layout.rightMargin: 12
+            }
+            MenuBar {
+                id: mainMenu
+                objectName: "mainMenu"
+                padding: 0
+                implicitHeight: 30
+                background: Item {}
+                delegate: MenuBarItem {
+                    id: menuTitle
+                    implicitHeight: 30
+                    leftPadding: 10
+                    rightPadding: 10
+                    font.pixelSize: 12
+                    contentItem: Text {
+                        text: menuTitle.text
+                        color: Theme.text
+                        font: menuTitle.font
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        radius: 6
+                        color: menuTitle.highlighted || menuTitle.hovered ? Theme.hover : "transparent"
+                    }
+                }
+                QuietMenu {
+                    objectName: "fileMenu"
+                    title: "파일"
+                    Action {
+                        text: "녹화 폴더 지정…"
+                        enabled: root.idle
+                        onTriggered: folderDialog.open()
+                    }
+                    Action {
+                        text: "녹화 폴더 열기"
+                        onTriggered: recorder.openOutputFolder()
+                    }
+                    QuietSeparator {}
+                    Action {
+                        text: "종료"
+                        onTriggered: root.close()
+                    }
+                }
+                QuietMenu {
+                    title: "편집"
+                    Action {
+                        text: "영상 열고 자르기…"
+                        enabled: root.idle
+                        onTriggered: recordingDialog.open()
+                    }
+                    Action {
+                        text: "최근 영상 편집"
+                        enabled: root.idle && recorder.lastFile.toString().length > 0
+                        onTriggered: editor.open()
+                    }
+                }
+                QuietMenu {
+                    title: "도움말"
+                    Action {
+                        objectName: "shortcutsAction"
+                        text: "단축키"
+                        onTriggered: {
+                            helpTabs.currentIndex = 0;
+                            helpDialog.open();
+                        }
+                    }
+                    Action {
+                        text: "사용 안내"
+                        onTriggered: {
+                            helpTabs.currentIndex = 1;
+                            helpDialog.open();
+                        }
+                    }
+                    Action {
+                        objectName: "licensesAction"
+                        text: "오픈소스 라이선스"
+                        onTriggered: licenseDialog.open()
+                    }
+                    QuietSeparator {}
+                    Action {
+                        objectName: "aboutAction"
+                        text: "FARecorder 정보"
+                        onTriggered: aboutDialog.open()
+                    }
+                    Action {
+                        text: "GitHub 저장소"
+                        onTriggered: Qt.openUrlExternally(recorder.appInfo.repository)
+                    }
+                    Action {
+                        text: "문제 제보"
+                        onTriggered: Qt.openUrlExternally(recorder.appInfo.repository + "/issues")
+                    }
+                }
             }
             Item {
                 Layout.fillWidth: true
@@ -352,101 +328,27 @@ ApplicationWindow {
                     onDoubleClicked: root.visibility === Window.Maximized ? root.showNormal() : root.showMaximized()
                 }
             }
-            ActionButton {
-                visible: root.activeRecording
-                text: "최적 모드"
-                implicitHeight: 29
-                font.pixelSize: 11
-                onClicked: recorder.setOptimized(true)
-            }
-            ActionButton {
-                objectName: "modeButton"
-                text: root.expanded ? "간소화" : "확장"
-                implicitHeight: 29
-                implicitWidth: 65
-                font.pixelSize: 11
-                onClicked: recorder.setExpanded(!root.expanded)
-            }
-            ToolButton {
+            IconButton {
                 visible: Qt.platform.os === "windows"
-                text: "-"
-                implicitWidth: 32
+                implicitWidth: 38
+                symbol: "minimize"
+                text: "최소화"
                 onClicked: root.showMinimized()
             }
-            ToolButton {
+            IconButton {
                 visible: Qt.platform.os === "windows"
-                text: "□"
-                implicitWidth: 32
+                implicitWidth: 38
+                symbol: root.visibility === Window.Maximized ? "restore" : "maximize"
+                text: root.visibility === Window.Maximized ? "이전 크기" : "최대화"
                 onClicked: root.visibility === Window.Maximized ? root.showNormal() : root.showMaximized()
             }
-            ToolButton {
+            IconButton {
                 visible: Qt.platform.os === "windows"
-                text: "×"
-                font.pixelSize: 20
-                implicitWidth: 32
+                implicitWidth: 38
+                danger: true
+                symbol: "close"
+                text: "닫기"
                 onClicked: root.close()
-            }
-        }
-    }
-    MenuBar {
-        id: mainMenu
-        objectName: "mainMenu"
-        anchors.top: titlebar.bottom
-        width: parent.width
-        visible: !root.optimized
-        background: Rectangle {
-            color: "#191919"
-            Rectangle {
-                anchors.bottom: parent.bottom
-                width: parent.width
-                height: 1
-                color: "#303030"
-            }
-        }
-        Menu {
-            title: "파일"
-            Action {
-                text: "녹화 폴더 지정…"
-                enabled: root.idle
-                onTriggered: folderDialog.open()
-            }
-            Action {
-                text: "녹화 폴더 열기"
-                onTriggered: recorder.openOutputFolder()
-            }
-            MenuSeparator {}
-            Action {
-                text: "종료"
-                onTriggered: root.close()
-            }
-        }
-        Menu {
-            title: "편집"
-            Action {
-                text: "영상 열고 자르기…"
-                enabled: root.idle
-                onTriggered: recordingDialog.open()
-            }
-            Action {
-                text: "최근 영상 편집"
-                enabled: root.idle && recorder.lastFile.toString().length > 0
-                onTriggered: editor.open()
-            }
-        }
-        Menu {
-            title: "도움말"
-            Action {
-                objectName: "aboutAction"
-                text: "FARecorder 정보"
-                onTriggered: aboutDialog.open()
-            }
-            Action {
-                text: "GitHub 저장소"
-                onTriggered: Qt.openUrlExternally(recorder.appInfo.repository)
-            }
-            Action {
-                text: "문제 제보"
-                onTriggered: Qt.openUrlExternally(recorder.appInfo.repository + "/issues")
             }
         }
     }
@@ -521,31 +423,33 @@ ApplicationWindow {
             }
         }
     }
-    Dialog {
+
+    QuietDialog {
         id: aboutDialog
         objectName: "aboutDialog"
         anchors.centerIn: parent
-        width: Math.min(420, root.width - 40)
+        width: Math.min(420, root.width - 48)
         title: "FARecorder 정보"
         modal: true
+        background: Rectangle {
+            color: "#252525"
+            radius: 14
+            border.color: "#414141"
+        }
         footer: DialogButtonBox {
-            Button {
+            background: Item {}
+            ActionButton {
                 text: "닫기"
                 DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
             }
-        }
-        background: Rectangle {
-            color: "#202020"
-            radius: 12
-            border.color: "#454545"
         }
         ColumnLayout {
             width: parent.width
             spacing: 16
             Image {
                 source: "qrc:/assets/app-icon.png"
-                Layout.preferredWidth: 64
-                Layout.preferredHeight: 64
+                Layout.preferredWidth: 60
+                Layout.preferredHeight: 60
                 mipmap: true
             }
             Heading {
@@ -554,73 +458,248 @@ ApplicationWindow {
             Caption {
                 text: "버전  " + recorder.appInfo.version + "\n제작자  " + recorder.appInfo.author + "\n마지막 업데이트  " + recorder.appInfo.updated
                 lineHeight: 1.7
-                color: "#c5c5c5"
+                color: "#bdbdbd"
             }
             Caption {
-                Layout.fillWidth: true
-                text: "C++ · Qt · Windows / macOS\n녹화용 음량 조절은 운영체제 음량과 별도로 적용됩니다."
-                wrapMode: Text.Wrap
-                lineHeight: 1.5
+                text: "FARecorder · MIT License\nD2Coding 1.4.0 · NAVER · SIL OFL 1.1"
+                lineHeight: 1.7
             }
+            RowLayout {
+                ActionButton {
+                    text: "라이선스"
+                    onClicked: licenseDialog.open()
+                }
+                ActionButton {
+                    text: "GitHub"
+                    onClicked: Qt.openUrlExternally(recorder.appInfo.repository)
+                }
+            }
+        }
+    }
+    QuietDialog {
+        id: licenseDialog
+        objectName: "licenseDialog"
+        anchors.centerIn: parent
+        width: Math.min(700, root.width - 48)
+        height: Math.min(600, root.height - 64)
+        title: "오픈소스 라이선스"
+        modal: true
+        background: Rectangle {
+            color: "#252525"
+            radius: 14
+            border.color: "#414141"
+        }
+        footer: DialogButtonBox {
+            background: Item {}
             ActionButton {
-                text: "GitHub 저장소 열기"
-                onClicked: Qt.openUrlExternally(recorder.appInfo.repository)
+                text: "닫기"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
             }
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 14
+            TabBar {
+                id: licenseTabs
+                Layout.fillWidth: true
+                background: Item {}
+                Segment {
+                    text: "FARecorder · MIT"
+                }
+                Segment {
+                    text: "D2Coding · OFL"
+                }
+                Segment {
+                    text: "기타 구성요소"
+                }
+            }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+                clip: true
+                TextArea {
+                    readOnly: true
+                    selectByMouse: true
+                    text: recorder.licenseText(licenseTabs.currentIndex === 0 ? "MIT" : licenseTabs.currentIndex === 1 ? "OFL" : "third-party")
+                    wrapMode: TextEdit.Wrap
+                    font.pixelSize: 12
+                    color: Theme.text
+                    background: Rectangle {
+                        color: Theme.panel
+                        radius: 10
+                    }
+                }
+            }
+        }
+    }
+    QuietDialog {
+        id: helpDialog
+        objectName: "helpDialog"
+        anchors.centerIn: parent
+        width: Math.min(620, root.width - 48)
+        height: Math.min(helpTabs.currentIndex === 0 ? 360 : 560, root.height - 64)
+        title: "도움말"
+        modal: true
+        background: Rectangle {
+            color: "#252525"
+            radius: 14
+            border.color: "#414141"
+        }
+        footer: DialogButtonBox {
+            background: Item {}
+            ActionButton {
+                text: "닫기"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 18
+            TabBar {
+                id: helpTabs
+                Layout.fillWidth: true
+                background: Item {}
+                Segment {
+                    text: "단축키"
+                }
+                Segment {
+                    text: "녹화"
+                }
+                Segment {
+                    text: "오디오"
+                }
+            }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+                clip: true
+                ColumnLayout {
+                    width: parent.width
+                    spacing: 16
+                    Repeater {
+                        model: helpTabs.currentIndex === 0 ? [
+                            {
+                                key: Qt.platform.os === "osx" ? "⌘R" : "Ctrl+R",
+                                label: "녹화 시작 / 종료"
+                            },
+                            {
+                                key: Qt.platform.os === "osx" ? "⌘P" : "Ctrl+P",
+                                label: "일시정지 / 재개"
+                            },
+                            {
+                                key: "Esc",
+                                label: "인코더 검사 · 카운트다운 · 영역 선택 취소"
+                            }
+                        ] : []
+                        delegate: RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            Caption {
+                                text: modelData.label
+                                Layout.fillWidth: true
+                                color: Theme.text
+                            }
+                            ActionButton {
+                                text: modelData.key
+                                enabled: false
+                                opacity: 1
+                                implicitHeight: 30
+                            }
+                        }
+                    }
+                    Caption {
+                        visible: helpTabs.currentIndex === 0
+                        Layout.fillWidth: true
+                        text: recorder.globalHotkeysAvailable ? "앱이 뒤에 있어도 동작하는 전역 단축키입니다." : recorder.hotkeyStatus
+                        wrapMode: Text.Wrap
+                        lineHeight: 1.7
+                    }
+                    Caption {
+                        visible: helpTabs.currentIndex > 0
+                        Layout.fillWidth: true
+                        color: "#c4c4c4"
+                        wrapMode: Text.Wrap
+                        textFormat: Text.RichText
+                        lineHeight: 1.8
+                        text: helpTabs.currentIndex === 1 ? "<b>화면 선택</b><br>화면과 창 목록은 자동으로 갱신됩니다. 대상을 고른 뒤 연결하세요. 오른쪽 패널 아이콘에서 상세 설정을 엽니다.<br><br><b>영역 녹화</b><br>영역 선택 후 드래그하면 선택한 픽셀 크기로 저장합니다. 녹화·일시정지 중에도 손잡이나 테두리를 옮길 수 있습니다. 이동 범위는 같은 디스플레이 내부입니다.<br><br><b>녹화와 저장</b><br>첫 녹화 또는 설정 변경 시 실제 인코딩을 검사한 뒤 시작합니다. 녹화 중에는 작은 화면으로 바뀌며 화살표로 원래 화면에 돌아올 수 있습니다. 멈춘 시간은 영상과 소리에서 제외됩니다.<br><br><b>저장 위치 · 편집</b><br>파일 메뉴나 하단 폴더 버튼에서 저장 폴더를 고릅니다. 기본 형식은 MP4입니다. 편집 저장 시 새 파일과 원본 덮어쓰기를 선택합니다. 복구용 원본 영상과 독립 WAV가 세션 폴더에 남습니다." : "<b>녹음할 소리 선택</b><br>마이크와 컴퓨터 소리 선택기를 눌러 실제 장치나 앱을 고릅니다. 처음에는 사용 안 함 상태입니다. 전체 출력 장치와 앱별 소리는 중복 선택하지 않습니다.<br><br><b>녹화용 믹서</b><br>상세 패널의 마이크 / 컴퓨터 탭에서 각각 음량과 음소거를 조절합니다. 운영체제의 음량 설정은 바꾸지 않습니다. 녹화 중에는 기존 소리의 음량·음소거만 바꿀 수 있습니다. 음소거로 저장한 구간은 나중에 복원할 수 없습니다.<br><br><b>소리 확인</b><br>소리 테스트는 선택한 소리를 5초 동안 녹음합니다. 샘플 듣기를 직접 누른 경우에만 소리를 재생합니다. 앱이 목록에 없으면 해당 앱에서 소리를 재생해 주세요. 연결이 끊긴 장치는 선택이 해제됩니다.<br><br><b>장치와 권한</b><br>마이크·화면 녹화 권한이 필요할 수 있습니다. macOS 마이크는 현재 시스템 기본 입력을 사용합니다."
+                    }
+                }
+            }
+        }
+    }
+
+    RowLayout {
+        id: bodyHeader
+        visible: !root.optimized
+        anchors {
+            top: titlebar.bottom
+            left: parent.left
+            right: parent.right
+            leftMargin: 20
+            rightMargin: 20
+        }
+        height: root.height < 700 ? 46 : 52
+        TabBar {
+            id: sourceTabs
+            objectName: "sourceTabs"
+            background: Item {}
+            currentIndex: root.mode
+            enabled: root.canChoose
+            onCurrentIndexChanged: root.mode = currentIndex
+            Segment {
+                text: "전체 화면"
+                implicitWidth: 84
+            }
+            Segment {
+                text: "특정 창"
+                implicitWidth: 76
+            }
+            Segment {
+                text: "영역"
+                implicitWidth: 60
+            }
+        }
+        Item {
+            Layout.fillWidth: true
+        }
+        IconButton {
+            visible: root.activeRecording
+            symbol: "compact"
+            text: "작은 녹화 화면"
+            onClicked: recorder.setOptimized(true)
+        }
+        IconButton {
+            objectName: "modeButton"
+            symbol: "panel"
+            text: root.expanded ? "상세 패널 닫기" : "상세 패널 열기"
+            onClicked: recorder.setExpanded(!root.expanded)
         }
     }
     RowLayout {
         objectName: "normalContent"
         visible: !root.optimized
         anchors {
-            top: mainMenu.bottom
+            top: bodyHeader.bottom
             left: parent.left
             right: parent.right
             bottom: parent.bottom
+            rightMargin: 8
+            bottomMargin: 8
         }
         spacing: 0
         ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.margins: 20
-            spacing: 12
-            RowLayout {
-                Text {
-                    text: "화면 녹화"
-                    color: "#f2f2f2"
-                    font.pixelSize: 20
-                    font.weight: Font.DemiBold
-                }
-                Item {
-                    Layout.fillWidth: true
-                }
-                Rectangle {
-                    width: 7
-                    height: 7
-                    radius: 4
-                    color: recorder.state === "recording" ? "#ef5751" : recorder.state === "paused" ? "#d1b57c" : "#777777"
-                }
-                Caption {
-                    text: ({
-                            idle: "대기",
-                            checking: "인코더 확인",
-                            preparing: "준비 중",
-                            countdown: "시작 대기",
-                            starting: "연결 중",
-                            recording: "녹화 중",
-                            paused: "일시정지",
-                            saving: "저장 중",
-                            editing: "편집 중"
-                        })[recorder.state] || recorder.state
-                    color: "#c0c0c0"
-                }
-            }
+            Layout.margins: root.height < 700 ? 14 : 20
+            spacing: root.height < 700 ? 8 : 14
             Rectangle {
                 visible: recorder.message.length > 0
                 Layout.fillWidth: true
                 implicitHeight: alertText.implicitHeight + 24
-                color: "#302322"
-                radius: 7
-                border.color: "#6b4440"
+                color: "#352522"
+                radius: 10
                 Text {
                     id: alertText
                     anchors {
@@ -630,121 +709,97 @@ ApplicationWindow {
                         margins: 12
                     }
                     text: recorder.message
-                    color: "#efb4ad"
+                    color: "#e8b7b0"
                     font.pixelSize: 11
                     wrapMode: Text.Wrap
                 }
-                ToolButton {
+                IconButton {
                     id: closeAlert
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "×"
+                    symbol: "close"
+                    text: "알림 닫기"
                     onClicked: recorder.clearMessage()
-                }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 6
-                Repeater {
-                    model: ["전체 화면", "특정 창", "영역"]
-                    delegate: ActionButton {
-                        required property int index
-                        required property string modelData
-                        text: modelData
-                        primary: root.mode === index
-                        implicitWidth: index === 2 ? 58 : 83
-                        implicitHeight: 33
-                        enabled: root.canChoose
-                        onClicked: root.mode = index
-                    }
-                }
-                Item {
-                    Layout.fillWidth: true
-                }
-                ActionButton {
-                    text: "새로고침"
-                    implicitHeight: 33
-                    implicitWidth: 82
-                    font.pixelSize: 11
-                    enabled: root.canChoose
-                    onClicked: recorder.refresh()
                 }
             }
             RowLayout {
                 Layout.fillWidth: true
                 Select {
                     id: displayCombo
+                    objectName: "displayCombo"
                     Layout.fillWidth: true
                     visible: root.mode !== 1
                     model: recorder.displays
                     textRole: "name"
                     valueRole: "id"
                     enabled: root.canChoose
+                    displayText: currentIndex < 0 ? (recorder.discovering ? "화면 찾는 중…" : "화면 선택") : currentText
+                    onActivated: root.displaySelection = currentValue
+                    onModelChanged: Qt.callLater(function () {
+                        root.restoreCombo(displayCombo, root.displaySelection, true);
+                    })
                 }
                 Select {
                     id: windowCombo
+                    objectName: "windowCombo"
                     Layout.fillWidth: true
                     visible: root.mode === 1
                     model: recorder.windows
                     textRole: "name"
                     valueRole: "id"
                     enabled: root.canChoose
+                    displayText: currentIndex < 0 ? (recorder.discovering ? "창 찾는 중…" : "창 선택") : currentText
+                    onActivated: root.windowSelection = currentValue
+                    onModelChanged: Qt.callLater(function () {
+                        root.restoreCombo(windowCombo, root.windowSelection, false);
+                    })
                 }
                 ActionButton {
                     text: root.mode === 2 ? "영역 선택" : "연결"
-                    implicitHeight: 36
-                    implicitWidth: 80
-                    enabled: root.canChoose && (root.mode === 1 ? windowCombo.count > 0 : displayCombo.count > 0)
+                    implicitHeight: 38
+                    implicitWidth: 84
+                    enabled: root.canChoose && (root.mode === 1 ? windowCombo.currentIndex >= 0 : displayCombo.currentIndex >= 0)
                     onClicked: root.mode === 2 ? recorder.beginRegion(displayCombo.currentValue) : recorder.connectSource(root.mode === 1 ? windowCombo.currentValue : displayCombo.currentValue, root.mode === 1)
                 }
             }
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.minimumHeight: 80
-                color: "#0a0a0a"
-                radius: 9
-                border.color: "#343434"
+                Layout.minimumHeight: 100
+                radius: 12
+                color: "#101010"
+                border.color: Theme.border
                 clip: true
                 Image {
                     anchors.fill: parent
                     anchors.margins: 1
-                    visible: recorder.hasSource
-                    source: recorder.hasSource ? "image://preview/" + recorder.previewRevision : ""
-                    cache: false
                     fillMode: Image.PreserveAspectFit
+                    asynchronous: false
+                    cache: false
+                    source: "image://preview/" + recorder.previewRevision
+                    visible: recorder.hasSource
                 }
                 Column {
                     visible: !recorder.hasSource
                     anchors.centerIn: parent
-                    spacing: 12
+                    spacing: 14
                     Rectangle {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: 44
-                        height: 30
-                        radius: 3
+                        width: 38
+                        height: 26
                         color: "transparent"
-                        border.color: "#656565"
-                        border.width: 2
-                        Rectangle {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            y: 35
-                            width: 15
-                            height: 2
-                            color: "#656565"
-                        }
+                        radius: 4
+                        border.width: 1
+                        border.color: "#666666"
                     }
                     Caption {
-                        anchors.horizontalCenter: parent.horizontalCenter
                         text: "녹화할 화면을 선택하세요"
-                        font.pixelSize: 13
-                        color: "#b0b0b0"
                     }
                 }
                 Rectangle {
                     visible: root.captureTestTick >= 0
                     width: 100
-                    height: 42
+                    height: 60
                     x: (root.captureTestTick * 7) % Math.max(1, parent.width - 100)
                     y: 16
                     color: root.captureTestTick % 2 ? "#e46660" : "#a1b9ae"
@@ -757,43 +812,34 @@ ApplicationWindow {
                 Rectangle {
                     anchors.fill: parent
                     visible: recorder.state === "countdown"
-                    color: "#dd101010"
+                    color: "#dd161616"
                     Text {
                         anchors.centerIn: parent
                         text: recorder.countdown
-                        color: "#eeeeee"
-                        font.pixelSize: 76
-                        font.weight: Font.Light
+                        color: Theme.text
+                        font.pixelSize: 72
                     }
                 }
                 Rectangle {
                     visible: recorder.state === "paused"
                     anchors.centerIn: parent
-                    width: 138
-                    height: 38
-                    radius: 19
-                    color: "#dd282828"
-                    Row {
+                    width: 128
+                    height: 36
+                    color: "#dd222222"
+                    radius: 10
+                    Text {
                         anchors.centerIn: parent
-                        spacing: 8
-                        Image {
-                            source: "qrc:/assets/pause.png"
-                            width: 19
-                            height: 19
-                            mipmap: true
-                        }
-                        Text {
-                            text: "일시정지"
-                            color: "#eeeeee"
-                            font.pixelSize: 13
-                        }
+                        text: "일시정지"
+                        color: "#d1b57c"
+                        font.pixelSize: 12
                     }
                 }
             }
             RowLayout {
+                Layout.fillWidth: true
                 Caption {
                     Layout.fillWidth: true
-                    text: recorder.hasSource ? recorder.sourceName : "선택한 소스 없음"
+                    text: recorder.sourceName || ""
                     elide: Text.ElideRight
                 }
                 Caption {
@@ -850,24 +896,34 @@ ApplicationWindow {
                     onActivated: recorder.setSetting("delay", values[currentIndex])
                 }
             }
+
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 10
-                AudioSwitch {
+                spacing: 12
+                AudioCard {
                     mic: true
+                    Layout.fillWidth: true
+                    routes: root.kindRoutes(true)
+                    allowSelection: root.canChoose
+                    allowMix: root.idle || root.activeRecording || recorder.audioTestActive
                 }
-                AudioSwitch {
+                AudioCard {
                     mic: false
+                    Layout.fillWidth: true
+                    routes: root.kindRoutes(false)
+                    allowSelection: root.canChoose
+                    allowMix: root.idle || root.activeRecording || recorder.audioTestActive
                 }
             }
             RowLayout {
                 Layout.fillWidth: true
+                spacing: 8
                 ActionButton {
                     objectName: "audioTestButton"
                     text: recorder.audioTestActive ? "테스트 중지" : "소리 테스트"
-                    implicitHeight: 32
+                    implicitHeight: 30
                     font.pixelSize: 11
-                    enabled: root.idle || recorder.audioTestActive
+                    enabled: recorder.audioTestActive || (root.idle && root.selectedRoutes.length > 0)
                     onClicked: {
                         testPlayer.stop();
                         recorder.toggleAudioTest();
@@ -876,44 +932,33 @@ ApplicationWindow {
                 ActionButton {
                     objectName: "samplePlayButton"
                     text: testPlayer.playbackState === MediaPlayer.PlayingState ? "듣기 중지" : "샘플 듣기"
-                    implicitHeight: 32
+                    implicitHeight: 30
                     font.pixelSize: 11
                     enabled: root.idle && !recorder.audioTestActive && recorder.audioSample.toString().length > 0
                     onClicked: testPlayer.playbackState === MediaPlayer.PlayingState ? testPlayer.stop() : testPlayer.play()
                 }
                 Caption {
+                    visible: recorder.audioTestActive
+                    text: recorder.audioTestProgress + "%"
+                }
+                Item {
                     Layout.fillWidth: true
-                    text: recorder.audioTestActive ? "5초 테스트 · " + recorder.audioTestProgress + "%" : recorder.audioSample.toString().length ? recorder.audioTestStatus : selectedRoutes.length ? selectedRoutes.length + "개 소스 · 녹화 음량만 조절" : "마이크·컴퓨터 소리를 선택하세요"
-                    elide: Text.ElideRight
-                    horizontalAlignment: Text.AlignRight
                 }
             }
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: "#343434"
+                color: Theme.border
             }
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 15
-                ColumnLayout {
-                    spacing: 4
-                    Text {
-                        text: recorder.elapsed
-                        color: "#f0f0f0"
-                        font.family: root.font.family
-                        font.pixelSize: 30
-                        font.letterSpacing: 1
-                    }
-                    Caption {
-                        text: recorder.state === "recording" ? recorder.throughput : recorder.state === "paused" ? "정지한 구간은 파일에서 제외" : recorder.encoderStatus === "passed" ? "인코더 준비됨" : "녹화 시작 전 인코더 자동 검사"
-                        font.pixelSize: 10
-                    }
-                    Caption {
-                        text: recorder.globalHotkeysAvailable ? (Qt.platform.os === "osx" ? "⌘⇧R 녹화 · ⌘⇧P 일시정지" : "Ctrl+Shift+R 녹화 · Ctrl+Shift+P 일시정지") : "전역 단축키 등록 실패 · 확장 화면에서 확인"
-                        font.pixelSize: 9
-                        color: recorder.globalHotkeysAvailable ? "#777777" : "#cfb27d"
-                    }
+                spacing: 12
+                Text {
+                    text: recorder.elapsed
+                    color: Theme.text
+                    font.pixelSize: 30
+                    font.family: root.font.family
+                    font.letterSpacing: 0
                 }
                 Item {
                     Layout.fillWidth: true
@@ -924,92 +969,76 @@ ApplicationWindow {
                     text: recorder.state === "paused" ? "녹화 재개" : "일시정지"
                     onClicked: recorder.togglePause()
                 }
-                ColumnLayout {
-                    spacing: 3
-                    TransportButton {
-                        objectName: "recordButton"
-                        Layout.alignment: Qt.AlignHCenter
-                        large: true
-                        symbol: root.activeRecording ? "stop" : "record"
-                        text: root.activeRecording ? "녹화 종료" : "녹화 시작"
-                        enabled: ["idle", "recording", "paused", "countdown", "checking", "preparing"].indexOf(recorder.state) >= 0
-                        onClicked: {
-                            testPlayer.stop();
-                            recorder.toggleRecording();
-                        }
-                    }
-                    Caption {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: root.activeRecording ? "정지" : recorder.state === "countdown" || recorder.state === "checking" ? "취소" : "녹화"
-                        color: "#cccccc"
-                        font.pixelSize: 10
+                TransportButton {
+                    objectName: "recordButton"
+                    large: true
+                    symbol: root.activeRecording ? "stop" : "record"
+                    text: root.activeRecording ? "녹화 종료" : "녹화 시작"
+                    enabled: ["idle", "recording", "paused", "countdown", "checking", "preparing"].indexOf(recorder.state) >= 0
+                    onClicked: {
+                        testPlayer.stop();
+                        recorder.toggleRecording();
                     }
                 }
             }
             RowLayout {
                 Layout.fillWidth: true
-                Caption {
-                    Layout.fillWidth: true
-                    text: recorder.settings.output
-                    elide: Text.ElideLeft
-                    font.pixelSize: 10
-                    ToolTip.visible: folderHover.hovered
-                    ToolTip.text: recorder.settings.output + "\n" + recorder.diskSpace
-                    HoverHandler {
-                        id: folderHover
-                    }
-                }
                 ActionButton {
                     objectName: "chooseFolderButton"
-                    text: "저장 위치…"
+                    text: "저장 위치"
                     implicitHeight: 28
                     font.pixelSize: 10
                     enabled: root.idle
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 500
+                    ToolTip.text: recorder.settings.output + "\n" + recorder.diskSpace
                     onClicked: folderDialog.open()
                 }
-                ActionButton {
-                    text: "녹화 폴더"
-                    implicitHeight: 28
-                    font.pixelSize: 10
-                    onClicked: recorder.openOutputFolder()
+                Item {
+                    Layout.fillWidth: true
                 }
-                ActionButton {
-                    text: "영상 편집"
-                    implicitHeight: 28
-                    font.pixelSize: 10
-                    enabled: root.idle
-                    onClicked: recorder.lastFile.toString().length ? editor.open() : recordingDialog.open()
+                Rectangle {
+                    width: 6
+                    height: 6
+                    radius: 3
+                    color: recorder.state === "recording" ? Theme.red : recorder.state === "paused" ? "#d1b57c" : "#757575"
+                }
+                Caption {
+                    text: ({
+                            idle: "대기",
+                            checking: "검사 중",
+                            preparing: "준비 중",
+                            countdown: "시작 대기",
+                            starting: "연결 중",
+                            recording: "녹화 중",
+                            paused: "일시정지",
+                            saving: "저장 중",
+                            editing: "편집 중"
+                        })[recorder.state] || recorder.state
                 }
             }
         }
         Rectangle {
             visible: root.expanded
             Layout.fillHeight: true
-            Layout.preferredWidth: 350
-            color: "#1a1a1a"
+            Layout.preferredWidth: 340
+            color: "transparent"
             Rectangle {
                 width: 1
                 height: parent.height
-                color: "#343434"
+                color: Theme.border
             }
             ScrollView {
+                id: detailsScroll
                 anchors.fill: parent
                 anchors.margins: 20
                 contentWidth: availableWidth
                 clip: true
                 ColumnLayout {
-                    width: parent.width
+                    width: detailsScroll.availableWidth
                     spacing: 16
-                    RowLayout {
-                        Heading {
-                            text: "상세 설정"
-                        }
-                        Item {
-                            Layout.fillWidth: true
-                        }
-                        Caption {
-                            text: "확장 모드"
-                        }
+                    Heading {
+                        text: "녹화 설정"
                     }
                     RowLayout {
                         ColumnLayout {
@@ -1135,87 +1164,56 @@ ApplicationWindow {
                             }
                         }
                     }
-                    CheckBox {
+                    QuietCheckBox {
                         text: "마우스 커서 포함"
                         checked: recorder.settings.cursor
                         enabled: root.idle
                         onToggled: recorder.setSetting("cursor", checked)
                         font.pixelSize: 12
                     }
+
                     Rectangle {
                         Layout.fillWidth: true
                         height: 1
-                        color: "#383838"
+                        color: Theme.border
                     }
-                    RowLayout {
-                        Heading {
-                            text: "녹화용 믹서"
-                        }
-                        Item {
-                            Layout.fillWidth: true
-                        }
-                        Caption {
-                            text: "앱 · 장치별 트랙"
-                        }
+                    Heading {
+                        text: "녹화용 믹서"
                     }
-                    Caption {
+                    TabBar {
+                        id: mixerTabs
+                        objectName: "mixerTabs"
                         Layout.fillWidth: true
-                        text: "운영체제 음량은 바꾸지 않습니다.\n앱별 소리와 시스템 전체 소리는 중복 선택하지 않습니다."
-                        wrapMode: Text.Wrap
-                        lineHeight: 1.4
-                        font.pixelSize: 10
+                        background: Rectangle {
+                            radius: 9
+                            color: Theme.panel
+                        }
+                        Segment {
+                            text: "마이크"
+                        }
+                        Segment {
+                            text: "컴퓨터 소리"
+                        }
                     }
                     Repeater {
-                        model: recorder.audio
+                        model: root.kindRoutes(mixerTabs.currentIndex === 0).length
                         delegate: AudioRoute {
-                            required property var modelData
+                            required property int index
                             Layout.fillWidth: true
-                            sourceData: modelData
+                            sourceData: root.kindRoutes(mixerTabs.currentIndex === 0)[index] || ({
+                                    id: "",
+                                    name: "",
+                                    kind: -1,
+                                    selected: false
+                                })
                             allowSelection: root.canChoose
                             allowMix: root.idle || root.activeRecording || recorder.audioTestActive
                         }
                     }
                     Caption {
-                        visible: recorder.audio.length === 0
+                        visible: root.kindRoutes(mixerTabs.currentIndex === 0).length === 0
                         Layout.fillWidth: true
-                        text: "새로고침하면 마이크와 앱이 표시됩니다.\n앱에서 소리를 재생한 뒤 새로고침해 주세요."
-                        wrapMode: Text.Wrap
-                        lineHeight: 1.4
-                    }
-                    Caption {
-                        Layout.fillWidth: true
-                        text: recorder.audioTestStatus
-                        wrapMode: Text.Wrap
-                        color: "#b6b6b6"
-                        font.pixelSize: 10
-                    }
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 1
-                        color: "#383838"
-                    }
-                    Caption {
-                        Layout.fillWidth: true
-                        text: recorder.hotkeyStatus
-                        wrapMode: Text.Wrap
-                        lineHeight: 1.5
-                        font.pixelSize: 10
-                    }
-                    RowLayout {
-                        Caption {
-                            Layout.fillWidth: true
-                            text: recorder.settings.output
-                            elide: Text.ElideLeft
-                            font.pixelSize: 10
-                        }
-                        ActionButton {
-                            text: "변경"
-                            implicitHeight: 28
-                            implicitWidth: 58
-                            font.pixelSize: 10
-                            enabled: root.idle
-                            onClicked: folderDialog.open()
-                        }
+                        text: recorder.discovering ? "찾는 중…" : mixerTabs.currentIndex === 0 ? "연결된 마이크 없음" : "사용 가능한 소리 없음"
                     }
                     Item {
                         height: 4
@@ -1369,7 +1367,7 @@ ApplicationWindow {
         }
     }
 
-    Dialog {
+    QuietDialog {
         id: editor
         anchors.centerIn: parent
         width: Math.min(root.width - 80, 1000)
@@ -1378,7 +1376,7 @@ ApplicationWindow {
         title: "녹화 완료 · 간단 편집"
         background: Rectangle {
             color: "#191919"
-            radius: 16
+            radius: Theme.windowRadius
             border.color: "#444444"
         }
         closePolicy: recorder.state === "editing" ? Popup.NoAutoClose : Popup.CloseOnEscape
@@ -1529,7 +1527,7 @@ ApplicationWindow {
             }
         }
     }
-    Dialog {
+    QuietDialog {
         id: saveChoice
         objectName: "saveChoice"
         anchors.centerIn: parent
@@ -1591,7 +1589,7 @@ ApplicationWindow {
             }
         }
     }
-    Dialog {
+    QuietDialog {
         id: closeDialog
         anchors.centerIn: parent
         modal: true

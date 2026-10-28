@@ -2,6 +2,8 @@
 #include "core/RecordingSession.h"
 #include "core/AudioCheck.h"
 #include "GlobalHotkeys.h"
+#include "SourceWatcher.h"
+#include <QFutureWatcher>
 #include <QTemporaryDir>
 #include <QElapsedTimer>
 #include <QMutex>
@@ -27,9 +29,9 @@ class PreviewProvider final : public QQuickImageProvider {
 };
 class RecorderController final : public QObject {
     Q_OBJECT
-    Q_PROPERTY(QVariantList displays READ displays NOTIFY sourcesChanged)
-    Q_PROPERTY(QVariantList windows READ windows NOTIFY sourcesChanged)
-    Q_PROPERTY(QVariantList audio READ audio NOTIFY sourcesChanged)
+    Q_PROPERTY(QVariantList displays READ displays NOTIFY videoSourcesChanged)
+    Q_PROPERTY(QVariantList windows READ windows NOTIFY videoSourcesChanged)
+    Q_PROPERTY(QVariantList audio READ audio NOTIFY audioSourcesChanged)
     Q_PROPERTY(QVariantMap audioLevels READ audioLevels NOTIFY tick)
     Q_PROPERTY(QVariantMap mixStates READ mixStates NOTIFY mixerChanged)
     Q_PROPERTY(QVariantMap settings READ settings NOTIFY settingsChanged)
@@ -57,8 +59,10 @@ class RecorderController final : public QObject {
     Q_PROPERTY(bool optimized READ optimized NOTIFY optimizedChanged)
     Q_PROPERTY(QVariantMap appInfo READ appInfo CONSTANT)
     Q_PROPERTY(QVariantMap regionInfo READ regionInfo NOTIFY regionChanged)
+    Q_PROPERTY(bool discovering READ discovering NOTIFY discoveryChanged)
   public:
-    explicit RecorderController(PreviewProvider *, QObject *parent = nullptr);
+    explicit RecorderController(PreviewProvider *, QObject *parent = nullptr,
+                                std::unique_ptr<luma::Platform> platform = {});
     ~RecorderController() override;
     QVariantList displays() const;
     QVariantList windows() const;
@@ -131,6 +135,12 @@ class RecorderController final : public QObject {
     QVariantMap regionInfo() const;
     Q_INVOKABLE void moveRegion(double globalX, double globalY);
     Q_INVOKABLE void configureRegionFrame(QObject *window);
+    Q_INVOKABLE void configureWindowChrome(QObject *window);
+    Q_INVOKABLE QString licenseText(QString name) const;
+    bool discovering() const {
+        return sourceFuture_.isRunning();
+    }
+    void configureUiFixture();
     Q_INVOKABLE void setOptimized(bool value);
     Q_PROPERTY(QString throughput READ throughput NOTIFY tick)
     QString throughput() const {
@@ -159,6 +169,8 @@ class RecorderController final : public QObject {
     Q_INVOKABLE void exportTrim(double startSeconds, double endSeconds, bool overwrite);
   signals:
     void sourcesChanged();
+    void videoSourcesChanged();
+    void audioSourcesChanged();
     void settingsChanged();
     void stateChanged();
     void messageChanged();
@@ -176,9 +188,11 @@ class RecorderController final : public QObject {
     void optimizedChanged();
     void mixerChanged();
     void regionChanged();
+    void discoveryChanged();
 
   private:
     void setState(QString state);
+    void notifySources(bool video = true, bool audio = true);
     void showMessage(QString message);
     void startNow();
     void saveSettings();
@@ -194,6 +208,16 @@ class RecorderController final : public QObject {
     void beginCountdown();
     QString encoderFingerprint() const;
     std::unique_ptr<luma::Platform> platform_;
+    struct SourceSnapshot {
+        QList<luma::Source> sources;
+        QList<luma::AudioSource> audio;
+        QString error;
+    };
+    SourceWatcher sourceWatcher_;
+    QTimer discoveryTimer_, discoveryDebounce_;
+    QFutureWatcher<SourceSnapshot> sourceFuture_;
+    bool automaticDiscovery_ = false;
+    bool discoveryBlocked_ = false;
     std::unique_ptr<luma::VideoCapture> video_;
     luma::RecordingSession session_;
     luma::AudioCheck audioCheck_;

@@ -1,6 +1,7 @@
 #include "RecorderController.h"
 #include "AppInfo.h"
 #include "RegionFixture.h"
+#include "DiscoveryFixture.h"
 #include "core/RegionGeometry.h"
 #include <QMouseEvent>
 #include <QAudioFormat>
@@ -21,6 +22,7 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QQuickItem>
 #include <QShortcut>
 #include <QTimer>
 #include <cmath>
@@ -40,6 +42,7 @@ int main(int argc, char **argv) {
     app.setApplicationDisplayName(appinfo::name);
     app.setApplicationVersion(appinfo::version);
     app.setWindowIcon(QIcon("qrc:/assets/app-icon.png"));
+    QQuickWindow::setDefaultAlphaBuffer(true);
     // Embedded faces keep the UI consistent without installing a system font.
     for (const auto *file : {":/fonts/D2Coding-Regular.ttf", ":/fonts/D2Coding-Bold.ttf"}) {
         if (QFontDatabase::addApplicationFont(file) < 0) {
@@ -54,7 +57,7 @@ int main(int argc, char **argv) {
         arguments.contains("--ui-smoke") || arguments.contains("--capture-test") ||
         arguments.contains("--edit-test") || arguments.contains("--workflow-test") ||
         arguments.contains("--encoder-test") || arguments.contains("--settings-test") ||
-        arguments.contains("--region-test");
+        arguments.contains("--region-test") || arguments.contains("--discovery-test");
     if (testing) {
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(
@@ -92,6 +95,54 @@ int main(int argc, char **argv) {
         }
         return 0;
     }
+    if (arguments.contains("--discovery-test")) {
+        PreviewProvider preview;
+        auto fixture = std::make_unique<DiscoveryFixture>();
+        auto *feed = fixture.get();
+        RecorderController controller(&preview, nullptr, std::move(fixture));
+        int stage = 0, events = 0, stableEvents = 0;
+        QObject::connect(&controller, &RecorderController::sourcesChanged, &app, [&] {
+            ++events;
+            const auto routes = controller.audio();
+            if (stage == 0 && routes.size() == 2) {
+                stage = 1;
+                controller.selectAudio("mic:mic", true);
+                controller.setAudioGain("mic:mic", 0.45);
+                stableEvents = events;
+                QTimer::singleShot(100, &controller, &RecorderController::refresh);
+                QTimer::singleShot(650, &app, [&] {
+                    if (events != stableEvents) {
+                        app.exit(30);
+                        return;
+                    }
+                    feed->phase = 1;
+                });
+            } else if (stage == 1 && routes.size() == 3) {
+                bool preserved = false;
+                for (const auto &route : routes) {
+                    const auto item = route.toMap();
+                    if (item.value("id") == "mic:mic")
+                        preserved = item.value("selected").toBool() &&
+                                    qAbs(item.value("gain").toDouble() - 0.45) < 0.01;
+                }
+                if (!preserved) {
+                    app.exit(31);
+                    return;
+                }
+                stage = 2;
+                feed->phase = 2;
+            } else if (stage == 2 && routes.size() == 2) {
+                for (const auto &route : routes)
+                    if (route.toMap().value("id") == "mic:mic") {
+                        app.exit(32);
+                        return;
+                    }
+                app.exit(feed->calls >= 4 ? 0 : 33);
+            }
+        });
+        QTimer::singleShot(10000, &app, [&] { app.exit(34); });
+        return app.exec();
+    }
     if (arguments.contains("--tone")) {
         const int index = arguments.indexOf("--tone");
         const double hz = arguments.value(index + 1, "440").toDouble();
@@ -115,6 +166,8 @@ int main(int argc, char **argv) {
     }
     auto *preview = new PreviewProvider;
     RecorderController controller(preview);
+    if (arguments.contains("--populated"))
+        controller.configureUiFixture();
     if (arguments.contains("--expanded"))
         controller.setExpanded(true);
     if (arguments.contains("--custom")) {
@@ -166,9 +219,11 @@ int main(int argc, char **argv) {
             QCoreApplication::sendEvent(frame, &release);
         };
         auto started = std::make_shared<bool>(false);
+        const auto uiThread = GetCurrentThreadId();
+        auto hotkey = [uiThread](int id) { PostThreadMessage(uiThread, WM_HOTKEY, WPARAM(id), 0); };
         QObject::connect(
             &controller, &RecorderController::stateChanged, &app,
-            [&, fixture, frame, fail, drag, started] {
+            [&, fixture, frame, fail, drag, started, hotkey] {
                 if (controller.state() != "recording" || *started)
                     return;
                 *started = true;
@@ -187,21 +242,30 @@ int main(int argc, char **argv) {
                     }
                     frame->grabWindow().save("artifacts/region-frame.png");
                 });
+                QTimer::singleShot(450, &app, [&, fail] {
+                    auto *root = engine.rootObjects().first();
+                    auto *help = root->findChild<QObject *>("helpDialog");
+                    auto *window = qobject_cast<QQuickWindow *>(root);
+                    if ((help && help->property("visible").toBool()) || !controller.optimized() ||
+                        window->width() != 400 || window->height() != 104)
+                        fail("Shortcut recording left a help popup open or failed to enter compact "
+                             "mode");
+                });
                 QTimer::singleShot(800, &app, [&, fixture, drag, fail] {
                     const auto x = fixture->x() + fixture->width() - 192;
                     drag(x, fixture->y() + 32);
                     if (qAbs(controller.regionInfo().value("x").toDouble() - x) > 1)
                         fail("Dragging the frame during recording did not translate the crop");
                 });
-                QTimer::singleShot(1200, &controller, &RecorderController::togglePause);
+                QTimer::singleShot(1200, &app, [hotkey] { hotkey(GlobalHotkeys::PauseId); });
                 QTimer::singleShot(1400, &app, [&, fixture, drag, fail] {
                     drag(fixture->x() + 32, fixture->y() + 32);
                     if (controller.state() != "paused" ||
                         qAbs(controller.regionInfo().value("x").toDouble() - fixture->x() - 32) > 1)
                         fail("Dragging while paused did not translate the crop");
                 });
-                QTimer::singleShot(1700, &controller, &RecorderController::togglePause);
-                QTimer::singleShot(2700, &controller, &RecorderController::toggleRecording);
+                QTimer::singleShot(1700, &app, [hotkey] { hotkey(GlobalHotkeys::PauseId); });
+                QTimer::singleShot(2700, &app, [hotkey] { hotkey(GlobalHotkeys::RecordId); });
             });
         QObject::connect(&controller, &RecorderController::lastFileChanged, &app, [&] {
             QFile out("artifacts/region-result.json");
@@ -210,11 +274,16 @@ int main(int argc, char **argv) {
                 QJsonDocument(QJsonObject{{"file", controller.lastFile().toLocalFile()},
                                           {"width", controller.settings().value("width").toInt()},
                                           {"height", controller.settings().value("height").toInt()},
-                                          {"dragVerified", true}})
+                                          {"dragVerified", true},
+                                          {"hotkeysVerified", controller.globalHotkeysAvailable()}})
                     .toJson());
             app.exit(0);
         });
-        QTimer::singleShot(800, &app, [&, fixture, fail] {
+        QTimer::singleShot(800, &app, [&, fixture, fail, hotkey] {
+            if (!controller.globalHotkeysAvailable()) {
+                fail(controller.hotkeyStatus());
+                return;
+            }
             const auto scale = fixture->devicePixelRatio();
             const QSize pixels(qRound(fixture->width() * scale), qRound(fixture->height() * scale));
             luma::Source source{QString::number(quintptr(fixture->winId())),
@@ -227,12 +296,14 @@ int main(int argc, char **argv) {
                 luma::regionFromLogical(QRectF(fixture->x() + 32, fixture->y() + 32, 160, 120),
                                         fixture->geometry(), pixels);
             controller.configureRegionTest(source, crop);
+            QMetaObject::invokeMethod(
+                engine.rootObjects().first()->findChild<QObject *>("helpDialog"), "open");
             if (controller.settings().value("width").toInt() != crop.width() ||
                 !controller.regionInfo().value("active").toBool()) {
                 fail("Selected pixel dimensions were not used as output dimensions");
                 return;
             }
-            QTimer::singleShot(400, &controller, &RecorderController::toggleRecording);
+            QTimer::singleShot(400, &app, [hotkey] { hotkey(GlobalHotkeys::RecordId); });
         });
         QTimer::singleShot(25000, &app, [fail] { fail("Silent region test timed out"); });
 #else
@@ -648,6 +719,11 @@ int main(int argc, char **argv) {
     if (app.arguments().contains("--ui-smoke")) {
         engine.rootObjects().first()->setProperty("previewScreenWidth", 1600);
         engine.rootObjects().first()->setProperty("previewScreenHeight", 1000);
+        if (arguments.contains("--small")) {
+            auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+            window->setWidth(720);
+            window->setHeight(640);
+        }
         QTimer::singleShot(1000, &app, [&] {
             auto *root = engine.rootObjects().first();
             auto *menu = root->findChild<QObject *>("mainMenu");
@@ -665,12 +741,83 @@ int main(int argc, char **argv) {
                 return;
             }
             auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+            if (arguments.contains("--small")) {
+                auto *folder = qobject_cast<QQuickItem *>(folderButton);
+                auto *record = root->findChild<QQuickItem *>("recordButton");
+                if (!folder || !record ||
+                    folder->mapToScene(QPointF(0, folder->height())).y() > window->height() ||
+                    record->mapToScene(QPointF(0, record->height())).y() > window->height()) {
+                    app.exit(42);
+                    return;
+                }
+            }
             const auto image = window->grabWindow();
             if (!image.isNull()) {
                 QDir().mkpath("artifacts");
-                image.save(arguments.contains("--custom")     ? "artifacts/ui-custom.png"
+                image.save(arguments.contains("--small") ? "artifacts/ui-small.png"
+                           : arguments.contains("--populated")
+                               ? (arguments.contains("--expanded")
+                                      ? "artifacts/ui-audio-expanded.png"
+                                      : "artifacts/ui-audio.png")
+                           : arguments.contains("--custom")   ? "artifacts/ui-custom.png"
                            : arguments.contains("--expanded") ? "artifacts/ui-expanded.png"
                                                               : "artifacts/ui-preview.png");
+            }
+            if (arguments.contains("--populated")) {
+                auto *mic = root->findChild<QObject *>("microphonePicker");
+                auto *computer = root->findChild<QObject *>("computerPicker");
+                if (!mic || !computer || !mic->property("text").toString().contains("USB Audio") ||
+                    !computer->property("text").toString().contains("Discord")) {
+                    app.exit(35);
+                    return;
+                }
+                controller.setAudioMuted("mic:fixture-mic", true);
+                if (!mic->property("text").toString().contains("USB Audio")) {
+                    app.exit(36);
+                    return;
+                }
+                controller.setAudioMuted("mic:fixture-mic", false);
+                auto *headset = root->findChild<QObject *>("source-option-mic:fixture-headset");
+                auto *speaker = root->findChild<QObject *>("source-option-system:fixture-speaker");
+                auto *discord = root->findChild<QObject *>("source-option-app:fixture-discord");
+                if (!headset || !speaker || !discord) {
+                    app.exit(43);
+                    return;
+                }
+                headset->setProperty("checked", true);
+                QMetaObject::invokeMethod(headset, "toggled");
+                if (!mic->property("text").toString().contains("외 1개")) {
+                    app.exit(44);
+                    return;
+                }
+                headset->setProperty("checked", false);
+                QMetaObject::invokeMethod(headset, "toggled");
+                speaker->setProperty("checked", true);
+                QMetaObject::invokeMethod(speaker, "toggled");
+                if (!computer->property("text").toString().contains("스피커") ||
+                    discord->property("checked").toBool()) {
+                    app.exit(45);
+                    return;
+                }
+                discord->setProperty("checked", true);
+                QMetaObject::invokeMethod(discord, "toggled");
+                if (!computer->property("text").toString().contains("Discord") ||
+                    speaker->property("checked").toBool()) {
+                    app.exit(46);
+                    return;
+                }
+                auto *tabs = root->findChild<QObject *>("mixerTabs");
+                if (!tabs || tabs->property("count").toInt() != 2) {
+                    app.exit(37);
+                    return;
+                }
+                tabs->setProperty("currentIndex", 1);
+            }
+            if (!controller.licenseText("MIT").contains("Copyright (c) 2026 yanggogi1423") ||
+                !controller.licenseText("OFL").contains("NAVER Corporation") ||
+                !controller.licenseText("OFL").contains("SIL OPEN FONT LICENSE")) {
+                app.exit(38);
+                return;
             }
             if (arguments.contains("--custom")) {
                 auto *root = engine.rootObjects().first();
@@ -688,8 +835,57 @@ int main(int argc, char **argv) {
                     return;
                 }
             }
+            auto *help = root->findChild<QObject *>("helpDialog");
+            QMetaObject::invokeMethod(root->findChild<QObject *>("shortcutsAction"), "trigger");
+            if (!help || !help->property("visible").toBool()) {
+                app.exit(39);
+                return;
+            }
+            QMetaObject::invokeMethod(help, "close");
+            auto *licenses = root->findChild<QObject *>("licenseDialog");
+            QMetaObject::invokeMethod(root->findChild<QObject *>("licensesAction"), "trigger");
+            if (!licenses || !licenses->property("visible").toBool()) {
+                app.exit(40);
+                return;
+            }
+            QMetaObject::invokeMethod(licenses, "close");
             auto *about = root->findChild<QObject *>("aboutDialog");
             auto *aboutAction = root->findChild<QObject *>("aboutAction");
+            if (arguments.contains("--review")) {
+                auto steps = std::make_shared<QList<QPair<QString, QString>>>(
+                    QList<QPair<QString, QString>>{{"fileMenu", "menu"},
+                                                   {"microphoneChoices", "microphones"},
+                                                   {"computerChoices", "computer-audio"},
+                                                   {"helpDialog", "shortcuts"},
+                                                   {"licenseDialog", "licenses"}});
+                auto index = std::make_shared<int>(0);
+                auto timer = new QTimer(&app);
+                timer->setInterval(500);
+                QObject::connect(
+                    timer, &QTimer::timeout, &app, [&, root, window, steps, index, timer] {
+                        if (*index > 0)
+                            QMetaObject::invokeMethod(
+                                root->findChild<QObject *>(steps->at(*index - 1).first), "close");
+                        if (*index == steps->size()) {
+                            timer->stop();
+                            app.exit(0);
+                            return;
+                        }
+                        auto *popup = root->findChild<QObject *>(steps->at(*index).first);
+                        if (!popup) {
+                            app.exit(41);
+                            return;
+                        }
+                        QMetaObject::invokeMethod(popup, "open");
+                        const auto name = steps->at(*index).second;
+                        QTimer::singleShot(200, &app, [window, name] {
+                            window->grabWindow().save("artifacts/ui-" + name + ".png");
+                        });
+                        ++*index;
+                    });
+                timer->start();
+                return;
+            }
             QMetaObject::invokeMethod(aboutAction, "trigger");
             QTimer::singleShot(200, &app, [&, about, window] {
                 if (!about || !about->property("opened").toBool()) {

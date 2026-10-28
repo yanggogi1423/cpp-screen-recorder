@@ -16,10 +16,8 @@ struct GlobalHotkeys::Native {
 GlobalHotkeys::GlobalHotkeys(QObject *parent)
     : QObject(parent), native_(std::make_unique<Native>()) {
 #ifdef Q_OS_WIN
-    const bool record =
-        RegisterHotKey(nullptr, RecordId, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, 'R');
-    const bool pause =
-        RegisterHotKey(nullptr, PauseId, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, 'P');
+    const bool record = RegisterHotKey(nullptr, RecordId, MOD_CONTROL | MOD_NOREPEAT, 'R');
+    const bool pause = RegisterHotKey(nullptr, PauseId, MOD_CONTROL | MOD_NOREPEAT, 'P');
     available_ = record && pause;
     if (!available_) {
         if (record)
@@ -28,7 +26,7 @@ GlobalHotkeys::GlobalHotkeys(QObject *parent)
             UnregisterHotKey(nullptr, PauseId);
     } else
         QCoreApplication::instance()->installNativeEventFilter(this);
-    status_ = available_ ? "전역 단축키 · Ctrl+Shift+R 시작/종료 · Ctrl+Shift+P 일시정지"
+    status_ = available_ ? "Ctrl+R 시작/종료 · Ctrl+P 일시정지/재개 · 앱이 뒤에 있어도 동작합니다."
                          : "단축키가 다른 앱에서 사용 중입니다. 앱 안의 버튼을 사용해 주세요.";
 #elif defined(Q_OS_MACOS)
     native_->callback =
@@ -53,10 +51,10 @@ GlobalHotkeys::GlobalHotkeys(QObject *parent)
     const auto handler = InstallEventHandler(GetApplicationEventTarget(), native_->callback, 1,
                                              &type, this, &native_->handler);
     EventHotKeyID record{0x4c554d41, RecordId}, pause{0x4c554d41, PauseId};
-    const auto a = RegisterEventHotKey(kVK_ANSI_R, cmdKey | shiftKey, record,
-                                       GetApplicationEventTarget(), 0, &native_->record);
-    const auto b = RegisterEventHotKey(kVK_ANSI_P, cmdKey | shiftKey, pause,
-                                       GetApplicationEventTarget(), 0, &native_->pause);
+    const auto a = RegisterEventHotKey(kVK_ANSI_R, cmdKey, record, GetApplicationEventTarget(), 0,
+                                       &native_->record);
+    const auto b = RegisterEventHotKey(kVK_ANSI_P, cmdKey, pause, GetApplicationEventTarget(), 0,
+                                       &native_->pause);
     available_ = handler == noErr && a == noErr && b == noErr;
     if (!available_) {
         if (native_->record) {
@@ -68,7 +66,7 @@ GlobalHotkeys::GlobalHotkeys(QObject *parent)
             native_->pause = nullptr;
         }
     }
-    status_ = available_ ? "전역 단축키 · ⌘⇧R 시작/종료 · ⌘⇧P 일시정지"
+    status_ = available_ ? "⌘R 시작/종료 · ⌘P 일시정지/재개 · 앱이 뒤에 있어도 동작합니다."
                          : "전역 단축키를 등록하지 못했습니다. 앱 안의 버튼을 사용해 주세요.";
 #endif
 }

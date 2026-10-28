@@ -59,3 +59,11 @@ Compact mode is controller state, allowed only while recording/paused. It never 
 ## Live region translation (0.3.0-alpha.3)
 
 RegionGeometry converts a global logical selection to display-local physical pixels and keeps output dimensions even. The selected region initializes output dimensions to its native size. Windows selects QScreen by HMONITOR; macOS uses display logical bounds. VideoCapture::setRegion changes only the origin, with fixed dimensions and serialized frame access. Cached full-frame data makes static-source translation immediate. The floating frame uses a hollow QWindow mask with all controls outside the ROI and Windows capture exclusion. See REGION_RECORDING.md for verification and boundaries.
+
+## Source discovery and shell (0.4)
+
+SourceWatcher receives Windows WinEvent window-lifecycle/title events, display/device messages and IMMNotificationClient endpoint events. macOS uses NSWorkspace launch/termination, screen-change and CoreAudio device/default-endpoint notifications. Signals are debounced by 300ms. Active-app polling at 2.5s covers changing audio sessions or windows without useful OS events; returning to the app also schedules discovery.
+
+QtConcurrent performs platform enumeration off the GUI thread. Snapshots are applied only while idle and outside audio audition. Equal snapshots are ignored. Video and audio model notifications are separate, and surviving source IDs reuse the original AudioMix pointer. Disappearing sources are deselected. Permission/query failure suspends polling until a relevant OS event or app reactivation.
+
+Theme.qml and the Quiet components own appearance. The normal shell has one title/menu row and a full-width source/panel header; the compact shell retains only recording controls. Help contains static explanations, keyboard bindings and license documents. MIT applies only to original project material; bundled third-party components retain their own licenses.

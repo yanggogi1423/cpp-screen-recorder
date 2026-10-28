@@ -1,34 +1,63 @@
-# FARecorder interface — 0.3
+# FARecorder 디자인 규칙 — 0.4
 
-The interface is a recording instrument with one transport area, not a general dashboard. It uses neutral black/gray surfaces, small separators, restrained typography and red only for recording/critical actions. It has no purple accent, decorative grid or marketing subtitle.
+2026-10-28. UI의 기준 문서이며 색·곡률은 `app/qml/Theme.qml`, 공통 컨트롤은 Quiet 컴포넌트에서 관리한다.
 
-## Three views, one configuration
+## 기준과 범위
 
-- **Simple** is the default. It contains screen/window/region selection, live preview, common resolution/FPS/delay choices, microphone/computer-audio switches, a five-second audio check, sample playback, the timer and record/pause/stop controls.
-- **Expanded** opens a side panel for exact dimensions/FPS, CPU/GPU encoder selection and checking, file format, delay, cursor, per-application/device mixer, hotkey status and output folder.
-- Changing view does not recreate the recording session, reset the sources or change output settings. The chosen view is remembered. Both normal views retain the recording mixer. Starting a session automatically enters the compact recording view.
-- During recording the simple audio switches mute/unmute selected routes; they cannot add a new capture source. A route that was not selected is disabled until recording ends.
+사용자가 제공한 ChatGPT/Codex 데스크톱 앱 화면을 강한 레퍼런스로 사용한다. 한 줄의 낮은 상단바, 촘촘한 메뉴, 중립 회색 호버, 둥근 팝업, 절제한 구분선과 여백을 따른다. FARecorder의 이름·녹화 아이콘을 유지하며 OpenAI 로고나 상표 이미지는 복제하지 않는다. 사용자의 원본 참고 스크린샷은 저장소에 포함하지 않는다.
 
-On Windows the native caption is replaced by a compact application header with drag, minimize, maximize/restore and close controls, plus edge resizing. The window size is constrained to the available logical screen dimensions. macOS keeps the native window frame.
+홈 화면은 설정 대시보드가 아니라 녹화 작업 화면이다. 설명 카드·마케팅 문구·장식용 그라데이션·가짜 미터·큰 강조 헤더를 추가하지 않는다.
 
-## Generated artwork
+## 색과 형태
 
-`app/assets/app-icon.png`, `record.png`, `stop.png`, `pause.png` and `resume.png` were generated specifically for this project with the built-in ImageGen tool. The icon uses a red recording circle in a black tile. Transport controls use separate transparent raster glyphs. They retain text tooltips and accessible names, so their meaning does not depend on the artwork alone. ICO and ICNS are packaging conversions of the generated app icon.
+| 용도 | 기준 |
+|---|---|
+| 기본 배경 | #191919, Windows에서는 약한 반투명 틴트 |
+| 패널 | #202020 |
+| 입력·팝업 | #252525 |
+| 호버 | #333333 |
+| 누름 | #3c3c3c |
+| 구분선 | #353535 |
+| 본문 / 보조 | #ececec / #929292 |
+| 녹화 | 빨강, 일시정지에는 황색 |
+| 곡률 | 창·대화상자 14, 팝업 12, 입력·버튼 10, 메뉴 항목 6–8 |
+| 간격 | 4 / 8 / 12 / 16 / 20의 작은 척도 |
 
-## Reference principles
+선택 상태와 호버에 흰 배경을 쓰지 않는다. 기본 버튼은 회색이며 녹화 조작만 빨강을 사용한다. 작은 선형 아이콘은 동일한 획 두께를 사용하고 접근성 이름과 지연 툴팁을 붙인다.
 
-- [Cap](https://cap.so/): a short, direct capture workflow.
-- [Screen Studio](https://screen.studio/): clear capture choices and a focused recording/editing experience.
-- [OBS mixer guide](https://obsproject.com/kb/audio-mixer-guide): clear source identity, independent levels, mute and meters.
+Windows는 한 줄 상단바에 앱 아이콘·이름·파일/편집/도움말·최소화/최대화/닫기를 둔다. DWM의 다크 프레임·둥근 모서리·배경 소재를 지원 환경에서 요청한다. OS가 배경 효과를 제한하거나 지원하지 않으면 어두운 틴트와 Qt의 둥근 배경을 유지한다. 최대화 시 외곽 곡률은 없앤다. macOS는 네이티브 창 제어를 유지하며 물리 장비의 배경 효과는 별도 검증한다.
 
-These are references for interaction structure; no third-party artwork or branding is included.
+## 글꼴
 
-## Compact recording and menus
+D2Coding 1.4.0의 원본 Regular/Bold를 앱 리소스에 내장한다. 본문 12, 보조 10–11, 섹션 제목 14, 타이머 30을 기본으로 한다. 메뉴·입력·도움말·타이머에서 서로 다른 글꼴로 전환하지 않는다. 시스템에 글꼴을 설치하지 않는다. 앱 정보에 NAVER / SIL OFL 1.1을 표시하고 라이선스 화면에서 원문을 제공한다.
 
-The 400×104 logical-pixel recording view contains status, elapsed time, pause/resume, stop and a restore button. Drag the timer area to move it. Its menu, normal header, preview and settings are hidden. Restore returns to the previous view and window geometry while recording continues, allowing live mixer changes. Stop/failure restores the normal window before saving/editing. Pause does not reopen or shrink the window again.
+## 화면 구조
 
-Normal simple/expanded views have File, Edit and Help menus. File selects/opens the configured recording root and exits through the existing close guard. Edit opens a video for trimming or edits the most recent file. Help shows the version, repository owner as creator, last source-update date and repository/issues links. The simple footer also exposes the configured path and folder chooser. Output defaults to MP4; MKV remains available in expanded settings.
+- 상단바는 44px 한 줄이다. 별도의 파일 메뉴 줄을 추가하지 않는다.
+- 상단바 아래 왼쪽에 전체 화면/특정 창/영역 탭, 창 오른쪽 끝에 상세 패널 아이콘을 둔다. ‘확장’ 텍스트 버튼은 사용하지 않는다.
+- 기본 화면: 대상 선택, 미리보기, 자주 쓰는 화질/FPS/지연, 두 오디오 선택기, 소리 테스트, 타이머·녹화 조작, 저장 위치 버튼.
+- 상세 패널: 정확한 크기/FPS, 인코더와 상태, 형식/지연/커서, 마이크/컴퓨터 소리 믹서 탭. 경로·단축키·설명을 반복하지 않는다.
+- 400×104 녹화 최적 화면: 타이머·일시정지/재개·정지·복귀만 둔다. 메뉴와 상세 패널은 숨긴다.
+- 영역 테두리는 선택 범위 밖에 유지하고 내부 클릭은 통과시킨다. 영역 이동 시 영상 크기는 바꾸지 않는다.
 
-## Typography — 0.3.0-alpha.2
+## 설명을 두는 위치
 
-D2Coding 1.4.0 standard Regular/Bold faces are embedded in Qt resources and loaded before any QML view is created on both platforms. The application default, window controls, menus and timer use the same family. This replaces the former Windows/macOS system-family split and Consolas timer override. The official unmodified fonts and OFL notice ship with the application; no OS font installation is needed.
+단축키, 인코더 사전 검사의 원리, OS 믹서와의 관계, 중복 소리 방지, 복구 파일, 경로 상세, 플랫폼 한계는 도움말에 둔다. 홈 타이머 아래 단축키나 ‘녹화 시작 전 인코더 자동 검사’ 문장을 표시하지 않는다. 경로 전체는 저장 위치 버튼 툴팁과 파일 대화상자에서만 보여 준다. 실제 오류·현재 작업 상태는 필요한 위치에서 짧게 표시한다.
+
+단축키는 Windows Ctrl+R 시작/종료, Ctrl+P 일시정지/재개다. macOS는 ⌘R/⌘P를 사용한다. OS 전역 등록 실패는 도움말에서 확인하며 앱 안의 단축키와 버튼을 사용할 수 있다.
+
+## 오디오 선택
+
+마이크/컴퓨터 소리 선택기는 켜졌다는 사실보다 **무엇을 녹음하는지**를 보여 준다. 초기 상태는 사용 안 함이며 사용자가 장치·앱을 직접 고른다. 실제 이름과 여러 소스 선택 수를 표시하고 선택 목록에 체크 표시를 둔다. 시스템 출력 장치와 앱별 소리는 그룹으로 구분한다. 음소거 아이콘은 이미 선택한 소리에만 작동한다.
+
+상세 믹서는 마이크와 컴퓨터 소리를 서로 다른 탭으로 분리한다. 장치가 없을 때만 짧은 빈 상태를 표시한다. 선택 시점에 마이크를 열거나 소리를 재생하지 않는다. 미터는 녹화 또는 사용자가 요청한 소리 테스트에서만 실제 입력을 표시한다.
+
+## 자동 갱신과 안정성
+
+새로고침 버튼은 없다. 시작 시 자동 조회하고, OS의 창/앱·모니터·오디오 장치 알림과 활성 상태에서의 주기 확인을 결합한다. 조회는 작업 스레드에서 수행하고 알림을 디바운스한다. 내용이 같으면 모델을 갱신하지 않는다. 창 변경이 오디오 위젯을 재생성하지 않도록 알림을 분리한다. 같은 소스의 선택·gain·mute를 보존하며 사라진 소스만 선택 해제한다. 녹화·소리 테스트 중에는 소스 구성을 바꾸지 않는다.
+
+## 라이선스와 검증
+
+원본 코드·문서·프로젝트 아트워크는 MIT, D2Coding은 OFL, Qt·FFmpeg는 각 원래 라이선스를 유지한다. 앱 정보와 도움말 라이선스 화면에 구분해 표시한다.
+
+UI 변경 뒤 기본/확장/장치가 있는 상태, 메뉴·오디오 팝업·도움말·라이선스를 렌더하고 잘림·중복·밝은 호버를 확인한다. 테스트용 가상 장치 이름은 UI fixture에만 넣으며 실제 기본값으로 표시하지 않는다. 일반 검증은 무음으로 수행한다.

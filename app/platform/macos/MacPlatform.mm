@@ -51,7 +51,7 @@ SCShareableContent *content() {
                                    dispatch_semaphore_signal(done);
                                  }];
     if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC)))
-        throw std::runtime_error("화면 녹화 권한을 허용한 뒤 다시 소스를 새로고침해 주세요.");
+        throw std::runtime_error("화면 녹화 권한을 허용한 뒤 앱으로 돌아와 주세요.");
     require(result != nil, failure.localizedDescription ?: @"화면 녹화 권한이 필요합니다.");
     return result;
 }

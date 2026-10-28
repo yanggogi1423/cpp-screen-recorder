@@ -1,8 +1,9 @@
+param([string]$InputFile, [int]$ExpectedAudioTracks = 3)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 try {
-    $inputPath = (Get-Content artifacts/workflow-normal-result.json -Raw | ConvertFrom-Json).file
+    $inputPath = if($InputFile){ (Resolve-Path -LiteralPath $InputFile).Path }else{ (Get-Content artifacts/workflow-normal-result.json -Raw | ConvertFrom-Json).file }
     $originalHash = (Get-FileHash -LiteralPath $inputPath -Algorithm SHA256).Hash
     function Invoke-Edit([string]$path, [switch]$Overwrite) {
         $arguments = @('--edit-test', ('"{0}"' -f $path))
@@ -17,7 +18,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Trimmed video could not be probed.' }
         $audio = @($probe.streams | Where-Object codec_type -eq 'audio')
         $duration = [double]$probe.format.duration
-        if ($audio.Count -ne 3 -or $duration -lt 1.95 -or $duration -gt 2.15) { throw 'Trim duration or independent audio tracks were not preserved.' }
+        if ($audio.Count -ne $ExpectedAudioTracks -or $duration -lt 1.95 -or $duration -gt 2.15) { throw 'Trim duration or independent audio tracks were not preserved.' }
         return $duration
     }
     $newFile = Invoke-Edit $inputPath
@@ -29,6 +30,6 @@ try {
     $overwriteDuration = Assert-Trim $overwritten
     if ($overwritten -ne $copy.Replace('\','/') -and $overwritten -ne $copy) { throw 'Overwrite returned another file.' }
     if ((Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash -eq $originalHash) { throw 'Overwrite did not replace the fixture.' }
-    [pscustomobject]@{Passed=$true;NewFile=$newFile;NewDuration=$newDuration;OriginalPreserved=$true;OverwriteDuration=$overwriteDuration;AudioTracks=3} | ConvertTo-Json | Set-Content artifacts/editor-verification.json -Encoding utf8
-    'PASS: MP4 trim, three audio tracks, original preservation and confirmed overwrite.'
+    [pscustomobject]@{Passed=$true;NewFile=$newFile;NewDuration=$newDuration;OriginalPreserved=$true;OverwriteDuration=$overwriteDuration;AudioTracks=$ExpectedAudioTracks} | ConvertTo-Json | Set-Content artifacts/editor-verification.json -Encoding utf8
+    "PASS: MP4 trim, $ExpectedAudioTracks audio tracks, original preservation and confirmed overwrite."
 } finally { Pop-Location }

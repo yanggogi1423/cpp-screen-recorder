@@ -8,6 +8,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <dwmapi.h>
 #endif
 #include <QDesktopServices>
 #include <QDir>
@@ -20,6 +21,7 @@
 #include <QUuid>
 #include <QStorageInfo>
 #include <cmath>
+#include <QtConcurrent/QtConcurrentRun>
 
 namespace {
 void tracePreflight(const QString &stage) {
@@ -51,8 +53,10 @@ void PreviewProvider::setFrame(QImage image) {
     QMutexLocker lock(&mutex_);
     image_ = std::move(image);
 }
-RecorderController::RecorderController(PreviewProvider *preview, QObject *parent)
-    : QObject(parent), platform_(luma::createPlatform()), preview_(preview) {
+RecorderController::RecorderController(PreviewProvider *preview, QObject *parent,
+                                       std::unique_ptr<luma::Platform> platform)
+    : QObject(parent), platform_(platform ? std::move(platform) : luma::createPlatform()),
+      preview_(preview) {
     QSettings store;
     // Carry forward existing capture preferences after the product rename. The new
     // product starts with MP4; a later explicit container selection is preserved.
@@ -205,6 +209,8 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
                     !error.isEmpty() ? error
                     : peak < 0.001 ? "소리가 감지되지 않았습니다. 소스·뮤트·장치 권한을 확인하세요."
                                    : "테스트 완료 · 샘플을 들어볼 수 있습니다";
+                if (!error.isEmpty() || peak < 0.001)
+                    showMessage(audioTestStatus_);
                 emit audioTestChanged();
                 if (pendingStart_) {
                     pendingStart_ = false;
@@ -279,9 +285,89 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
             showMessage(encoderDetail_);
         }
     });
-    // Listing capture sources can request OS permission. Do it on explicit user refresh.
+    connect(&sourceFuture_, &QFutureWatcher<SourceSnapshot>::finished, this, [this] {
+        emit discoveryChanged();
+        if (state_ != "idle" || audioCheck_.active())
+            return;
+        auto next = sourceFuture_.result();
+        if (!next.error.isEmpty()) {
+            discoveryBlocked_ = true;
+            showMessage(next.error);
+            return;
+        }
+        for (auto &fresh : next.audio)
+            for (const auto &old : audioList_)
+                if (fresh.id == old.id && fresh.kind == old.kind) {
+                    fresh.mix = old.mix;
+                    break;
+                }
+        const bool videoChanged = next.sources != sourceList_,
+                   audioChanged = next.audio != audioList_;
+        if (!videoChanged && !audioChanged)
+            return;
+        if (videoChanged)
+            sourceList_ = std::move(next.sources);
+        if (audioChanged)
+            audioList_ = std::move(next.audio);
+        QSet<QString> available;
+        for (const auto &entry : audioList_)
+            available.insert((entry.kind == luma::AudioKind::Microphone ? "mic:"
+                              : entry.kind == luma::AudioKind::System   ? "system:"
+                                                                        : "app:") +
+                             entry.id);
+        selectedAudio_.intersect(available);
+        if (video_ && std::none_of(sourceList_.cbegin(), sourceList_.cend(), [this](const auto &s) {
+                return s.id == regionSource_.id && s.kind == regionSource_.kind;
+            })) {
+            video_.reset();
+            regionCrop_ = {};
+            regionScreen_ = nullptr;
+            sourceName_.clear();
+            preview_->setFrame({});
+            ++revision_;
+            emit sourceChanged();
+            emit regionChanged();
+            emit previewChanged();
+        }
+        notifySources(videoChanged, audioChanged);
+    });
+    discoveryDebounce_.setSingleShot(true);
+    discoveryDebounce_.setInterval(300);
+    connect(&discoveryDebounce_, &QTimer::timeout, this, &RecorderController::refresh);
+    discoveryTimer_.setInterval(2500);
+    connect(&discoveryTimer_, &QTimer::timeout, this, [this] {
+        if (!discoveryBlocked_ && (QGuiApplication::applicationState() == Qt::ApplicationActive ||
+                                   QCoreApplication::arguments().contains("--discovery-test")))
+            refresh();
+    });
+    connect(&sourceWatcher_, &SourceWatcher::changed, this, [this] {
+        discoveryBlocked_ = false;
+        discoveryDebounce_.start();
+    });
+    connect(qGuiApp, &QGuiApplication::applicationStateChanged, this,
+            [this](Qt::ApplicationState state) {
+                if (automaticDiscovery_ && state == Qt::ApplicationActive) {
+                    discoveryBlocked_ = false;
+                    discoveryDebounce_.start();
+                }
+            });
+    const auto args = QCoreApplication::arguments();
+    automaticDiscovery_ = std::none_of(args.begin(), args.end(), [](const auto &arg) {
+        return QStringList{"--ui-smoke",  "--workflow-test", "--capture-test", "--region-test",
+                           "--edit-test", "--encoder-test",  "--settings-test"}
+            .contains(arg);
+    });
+    if (automaticDiscovery_) {
+        sourceWatcher_.start();
+        discoveryTimer_.start();
+        discoveryDebounce_.start();
+    }
 }
 RecorderController::~RecorderController() {
+    sourceWatcher_.stop();
+    discoveryTimer_.stop();
+    discoveryDebounce_.stop();
+    sourceFuture_.waitForFinished();
     audioCheck_.stopAndWait();
     if (encoderProbe_.state() != QProcess::NotRunning) {
         encoderProbe_.kill();
@@ -299,6 +385,17 @@ void RecorderController::setState(QString value) {
     if (state_ != "recording" && state_ != "paused")
         setOptimized(false);
     emit stateChanged();
+    if (automaticDiscovery_ && state_ == "idle")
+        discoveryDebounce_.start();
+}
+void RecorderController::notifySources(bool video, bool audio) {
+    if (video)
+        emit videoSourcesChanged();
+    if (audio) {
+        emit audioSourcesChanged();
+        emit mixerChanged();
+    }
+    emit sourcesChanged();
 }
 void RecorderController::showMessage(QString value) {
     message_ = std::move(value);
@@ -377,22 +474,28 @@ QString RecorderController::elapsed() const {
         .arg(seconds % 60, 2, 10, QChar('0'));
 }
 void RecorderController::refresh() {
-    if (state_ != "idle" || audioCheck_.active())
+    if (state_ != "idle" || audioCheck_.active() || sourceFuture_.isRunning())
         return;
-    try {
-        sourceList_ = platform_->sources();
-        auto fresh = platform_->audioSources();
-        for (auto &next : fresh)
-            for (const auto &previous : audioList_)
-                if (next.id == previous.id && next.kind == previous.kind) {
-                    next.mix = previous.mix;
-                    break;
-                }
-        audioList_ = std::move(fresh);
-        emit sourcesChanged();
-    } catch (const std::exception &ex) {
-        showMessage(QString::fromUtf8(ex.what()));
-    }
+    sourceFuture_.setFuture(QtConcurrent::run([platform = platform_.get()] {
+        SourceSnapshot result;
+        try {
+            result.sources = platform->sources();
+            result.audio = platform->audioSources();
+            std::stable_sort(result.sources.begin(), result.sources.end(),
+                             [](const auto &a, const auto &b) {
+                                 if (a.kind != b.kind)
+                                     return int(a.kind) < int(b.kind);
+                                 if (a.kind == luma::SourceKind::Display &&
+                                     a.bounds.topLeft().isNull() != b.bounds.topLeft().isNull())
+                                     return a.bounds.topLeft().isNull();
+                                 return a.id < b.id;
+                             });
+        } catch (const std::exception &ex) {
+            result.error = QString::fromUtf8(ex.what());
+        }
+        return result;
+    }));
+    emit discoveryChanged();
 }
 bool RecorderController::attach(const luma::Source &source, QRect crop) {
     try {
@@ -443,7 +546,7 @@ void RecorderController::beginRegion(QString id) {
             if (source.id == id) {
                 const auto screen = screenForSource(source);
                 if (!screen) {
-                    showMessage("선택한 디스플레이를 찾지 못했습니다. 새로고침해 주세요.");
+                    showMessage("디스플레이 연결을 확인한 뒤 대상을 다시 선택해 주세요.");
                     return;
                 }
                 const auto geo = screen->geometry();
@@ -500,7 +603,7 @@ void RecorderController::configureRegionTest(const luma::Source &source, QRect c
     settings_.encoder = "libx264";
     settings_.outputFolder = QDir::current().absoluteFilePath("artifacts/region-recordings");
     attachRegion(source, crop, source.logicalBounds);
-    emit sourcesChanged();
+    notifySources();
 }
 QScreen *RecorderController::screenForSource(const luma::Source &source) const {
     for (auto *screen : QGuiApplication::screens()) {
@@ -566,6 +669,43 @@ void RecorderController::configureRegionFrame(QObject *object) {
         SetWindowDisplayAffinity(reinterpret_cast<HWND>(window->winId()), WDA_EXCLUDEFROMCAPTURE);
 #endif
 }
+void RecorderController::configureWindowChrome(QObject *object) {
+    auto *window = qobject_cast<QWindow *>(object);
+    if (!window)
+        return;
+#ifdef Q_OS_WIN
+    if (QGuiApplication::platformName() != "windows")
+        return;
+    const auto handle = reinterpret_cast<HWND>(window->winId());
+    const BOOL dark = TRUE;
+    const int corner = 2, backdrop = 3;
+    DwmSetWindowAttribute(handle, static_cast<DWMWINDOWATTRIBUTE>(20), &dark, sizeof(dark));
+    DwmSetWindowAttribute(handle, static_cast<DWMWINDOWATTRIBUTE>(33), &corner, sizeof(corner));
+    DwmSetWindowAttribute(handle, static_cast<DWMWINDOWATTRIBUTE>(38), &backdrop, sizeof(backdrop));
+    const MARGINS glass{-1, -1, -1, -1};
+    DwmExtendFrameIntoClientArea(handle, &glass);
+#endif
+}
+QString RecorderController::licenseText(QString name) const {
+    const auto path = name == "MIT"   ? ":/licenses/LICENSE"
+                      : name == "OFL" ? ":/fonts/OFL.txt"
+                                      : ":/licenses/THIRD_PARTY_NOTICES.md";
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
+}
+void RecorderController::configureUiFixture() {
+    sourceList_ = {
+        {"fixture-display", "디스플레이 1 · 2560 × 1440", luma::SourceKind::Display,
+         QRect(0, 0, 2560, 1440)},
+        {"fixture-window", "영상 편집기", luma::SourceKind::Window, QRect(0, 0, 1280, 720)}};
+    audioList_ = {{"fixture-mic", "마이크 (USB Audio)", "", luma::AudioKind::Microphone},
+                  {"fixture-headset", "헤드셋 마이크", "", luma::AudioKind::Microphone},
+                  {"fixture-speaker", "스피커 (USB Audio)", "", luma::AudioKind::System},
+                  {"fixture-discord", "Discord", "", luma::AudioKind::Application},
+                  {"fixture-browser", "브라우저", "", luma::AudioKind::Application}};
+    selectedAudio_ = {"mic:fixture-mic", "app:fixture-discord"};
+    notifySources();
+}
 void RecorderController::selectAudio(QString id, bool selected) {
     if (state_ != "idle" || audioCheck_.active())
         return;
@@ -588,7 +728,7 @@ void RecorderController::selectAudio(QString id, bool selected) {
         selectedAudio_.insert(id);
     } else
         selectedAudio_.remove(id);
-    emit sourcesChanged();
+    notifySources(false, true);
 }
 void RecorderController::setAudioGain(QString id, double gain) {
     if (!std::isfinite(gain))
@@ -836,7 +976,7 @@ void RecorderController::configureWorkflowTest(const luma::Source &source,
     settings_.encoder = "libx264";
     settings_.outputFolder = QDir::current().absoluteFilePath("artifacts/recordings");
     emit settingsChanged();
-    emit sourcesChanged();
+    notifySources();
     attach(source);
 }
 void RecorderController::startNow() {
