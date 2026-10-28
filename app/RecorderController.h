@@ -46,6 +46,7 @@ class RecorderController final : public QObject {
     Q_PROPERTY(QString elapsed READ elapsed NOTIFY tick)
     Q_PROPERTY(QString estimatedSize READ estimatedSize NOTIFY tick)
     Q_PROPERTY(QVariantMap recordingFile READ recordingFile NOTIFY lastFileChanged)
+    Q_PROPERTY(bool hasUnsavedRecording READ hasUnsavedRecording NOTIFY unsavedChanged)
     Q_PROPERTY(QUrl lastFile READ lastFile NOTIFY lastFileChanged)
     Q_PROPERTY(QString platformName READ platformName CONSTANT)
     Q_PROPERTY(bool encoderReady READ encoderReady CONSTANT)
@@ -97,6 +98,11 @@ class RecorderController final : public QObject {
     QString elapsed() const;
     QString estimatedSize() const;
     QVariantMap recordingFile() const;
+    bool hasUnsavedRecording() const {
+        return unsavedRecording_;
+    }
+    Q_INVOKABLE void requestRecordingSave();
+    Q_INVOKABLE void leaveRecordingUnsaved();
     QUrl lastFile() const {
         return QUrl::fromLocalFile(lastFile_);
     }
@@ -169,6 +175,7 @@ class RecorderController final : public QObject {
     void configureWorkflowTest(const luma::Source &, const QList<luma::AudioSource> &);
     void configureRegionTest(const luma::Source &, QRect crop);
     Q_INVOKABLE void openOutputFolder();
+    Q_INVOKABLE void openRecoveryFolder();
     Q_INVOKABLE void openRecording(QUrl file);
     Q_INVOKABLE void saveRecording(QUrl folder, QString name, bool overwrite = false);
     Q_INVOKABLE void clearMessage();
@@ -188,6 +195,7 @@ class RecorderController final : public QObject {
     void editorRequested();
     void recordingReady();
     void recordingSaved();
+    void unsavedChanged();
     void overwriteRequested();
     void trimFinished(QUrl file);
     void closeAllowed();
@@ -226,6 +234,7 @@ class RecorderController final : public QObject {
     QTimer discoveryTimer_, discoveryDebounce_;
     QFutureWatcher<SourceSnapshot> sourceFuture_;
     QFutureWatcher<luma::FileSaveResult> saveFuture_;
+    bool unsavedRecording_ = false;
     bool automaticDiscovery_ = false;
     bool discoveryBlocked_ = false;
     std::unique_ptr<luma::VideoCapture> video_;

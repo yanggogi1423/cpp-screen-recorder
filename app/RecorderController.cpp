@@ -132,6 +132,8 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
     connect(&session_, &luma::RecordingSession::finished, this,
             [this](QString file, QString warning) {
                 lastFile_ = file;
+                unsavedRecording_ = true;
+                emit unsavedChanged();
                 setState("idle");
                 emit lastFileChanged();
                 if (!warning.isEmpty())
@@ -149,6 +151,8 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
             showMessage(result.error);
         else {
             lastFile_ = result.file;
+            unsavedRecording_ = false;
+            emit unsavedChanged();
             emit lastFileChanged();
             emit recordingSaved();
         }
@@ -632,6 +636,7 @@ void RecorderController::configureRegionTest(const luma::Source &source, QRect c
     settings_.delaySeconds = 0;
     settings_.encoder = "libx264";
     settings_.outputFolder = QDir::current().absoluteFilePath("artifacts/region-recordings");
+    settings_.recoveryFolder = QDir::current().absoluteFilePath("artifacts/region-work");
     attachRegion(source, crop, source.logicalBounds);
     notifySources();
 }
@@ -856,6 +861,10 @@ void RecorderController::toggleRecording() {
     }
     if (state_ != "idle")
         return;
+    if (unsavedRecording_) {
+        emit recordingReady();
+        return;
+    }
     try {
         settings_.validate();
         if (!video_ || video_->latestFrame().isNull())
@@ -1005,6 +1014,7 @@ void RecorderController::configureWorkflowTest(const luma::Source &source,
     settings_.delaySeconds = 0;
     settings_.encoder = "libx264";
     settings_.outputFolder = QDir::current().absoluteFilePath("artifacts/recordings");
+    settings_.recoveryFolder = QDir::current().absoluteFilePath("artifacts/workflow-work");
     emit settingsChanged();
     notifySources();
     attach(source);
@@ -1034,17 +1044,44 @@ void RecorderController::openOutputFolder() {
 void RecorderController::openRecording(QUrl file) {
     if (state_ != "idle" || !file.isLocalFile() || !QFileInfo::exists(file.toLocalFile()))
         return;
+    if (unsavedRecording_) {
+        emit recordingReady();
+        return;
+    }
     lastFile_ = file.toLocalFile();
     emit lastFileChanged();
     emit editorRequested();
+}
+void RecorderController::openRecoveryFolder() {
+    const auto folder =
+        settings_.recoveryFolder.isEmpty()
+            ? QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+                  .filePath("Recovery")
+            : settings_.recoveryFolder;
+    if (!QDir().mkpath(folder) || !QDesktopServices::openUrl(QUrl::fromLocalFile(folder)))
+        showMessage("복구 폴더를 열 수 없습니다.");
+}
+void RecorderController::requestRecordingSave() {
+    if (state_ == "idle" && unsavedRecording_)
+        emit recordingReady();
+}
+void RecorderController::leaveRecordingUnsaved() {
+    if (state_ != "idle")
+        return;
+    unsavedRecording_ = false;
+    emit unsavedChanged();
 }
 void RecorderController::saveRecording(QUrl folder, QString name, bool overwrite) {
     if (state_ != "idle" || saveFuture_.isRunning())
         return;
     name = name.trimmed();
-    if (!folder.isLocalFile() || !QDir(folder.toLocalFile()).exists() || name.isEmpty() ||
-        name == "." || name == ".." || name.contains(QRegularExpression("[\\\\/:*?\"<>|]"))) {
+    if (!folder.isLocalFile() || name.isEmpty() || name == "." || name == ".." ||
+        name.contains(QRegularExpression("[\\\\/:*?\"<>|]"))) {
         showMessage("저장 위치와 파일 이름을 확인해 주세요.");
+        return;
+    }
+    if (!QDir().mkpath(folder.toLocalFile())) {
+        showMessage("저장 폴더를 만들 수 없습니다.");
         return;
     }
     const QFileInfo original(lastFile_);

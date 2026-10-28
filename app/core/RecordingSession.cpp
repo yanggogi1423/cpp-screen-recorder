@@ -14,6 +14,7 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QUuid>
+#include <QStandardPaths>
 #include <vector>
 
 namespace luma {
@@ -121,10 +122,15 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
         if (ffmpeg.isEmpty())
             throw std::runtime_error(
                 "FFmpeg가 없습니다. tools/setup-ffmpeg.ps1을 먼저 실행해 주세요.");
-        folder = QDir(s.outputFolder)
-                     .filePath("FARecorder_" +
-                               QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss") + "_" +
-                               QUuid::createUuid().toString(QUuid::Id128).left(4));
+        const auto recordingName = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss-zzz");
+        const auto recoveryRoot =
+            s.recoveryFolder.isEmpty()
+                ? QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+                      .filePath("Recovery")
+                : s.recoveryFolder;
+        folder =
+            QDir(recoveryRoot)
+                .filePath(recordingName + "_" + QUuid::createUuid().toString(QUuid::Id128).left(8));
         if (!QDir().mkpath(folder))
             throw std::runtime_error("녹화 폴더를 만들지 못했습니다.");
         auto first = video->latestFrame();
@@ -269,7 +275,7 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
                                          .toStdString());
         estimatedBytes_ = estimatedRecordingBytes(QFileInfo(rawVideo).size(), frames_, s.fps,
                                                   int(sources.size()));
-        const auto output = QDir(folder).filePath("recording." + s.container);
+        const auto output = QDir(folder).filePath(recordingName + "." + s.container);
         QStringList args = {"-hide_banner", "-y", "-i", rawVideo};
         for (const auto &entry : trackInfo)
             args << "-i" << entry.toObject()["file"].toString();

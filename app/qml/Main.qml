@@ -185,20 +185,32 @@ ApplicationWindow {
             close.accepted = false;
             recorder.setOptimized(false);
             closeDialog.open();
+        } else if (recorder.hasUnsavedRecording) {
+            close.accepted = false;
+            unsavedExit.open();
         }
     }
     Connections {
         target: recorder
+        function onMessageChanged() {
+            if (recorder.message.length > 0)
+                root.closeAfterSave = false;
+        }
         function onEditorRequested() {
             testPlayer.stop();
             editor.open();
         }
         function onRecordingReady() {
-            if (!root.closeAfterSave)
-                recordingSave.prepare();
+            recordingSave.prepare();
         }
         function onRecordingSaved() {
+            var shouldClose = root.closeAfterSave;
+            root.closeAfterSave = false;
             recordingSave.close();
+            if (shouldClose)
+                Qt.callLater(function () {
+                    root.close();
+                });
         }
         function onOverwriteRequested() {
             recordingOverwrite.open();
@@ -239,7 +251,14 @@ ApplicationWindow {
             if (root.closeAfterSave && root.activeRecording)
                 recorder.toggleRecording();
             if (root.closeAfterSave && root.idle)
-                Qt.quit();
+                Qt.callLater(function () {
+                    if (root.closeAfterSave && root.idle) {
+                        if (recorder.hasUnsavedRecording)
+                            recorder.requestRecordingSave();
+                        else
+                            root.close();
+                    }
+                });
             if (root.idle && editor.opened && player.source.toString().length === 0)
                 player.source = recorder.lastFile;
             if (!root.idle)
@@ -318,6 +337,11 @@ ApplicationWindow {
                     objectName: "fileMenu"
                     title: "파일"
                     Action {
+                        text: "녹화 저장…"
+                        enabled: root.idle && recorder.hasUnsavedRecording
+                        onTriggered: recorder.requestRecordingSave()
+                    }
+                    Action {
                         text: "녹화 폴더 지정…"
                         enabled: root.idle
                         onTriggered: folderDialog.open()
@@ -325,6 +349,10 @@ ApplicationWindow {
                     Action {
                         text: "녹화 폴더 열기"
                         onTriggered: recorder.openOutputFolder()
+                    }
+                    Action {
+                        text: "복구 파일 열기"
+                        onTriggered: recorder.openRecoveryFolder()
                     }
                     QuietSeparator {}
                     Action {
@@ -706,7 +734,7 @@ ApplicationWindow {
                         wrapMode: Text.Wrap
                         textFormat: Text.RichText
                         lineHeight: 1.8
-                        text: helpTabs.currentIndex === 1 ? "<b>화면 선택</b><br>화면과 창 목록은 자동으로 갱신됩니다. 대상을 고른 뒤 연결하세요. 오른쪽 패널 아이콘에서 상세 설정을 엽니다.<br><br><b>영역 녹화</b><br>영역 선택 후 드래그하면 선택한 픽셀 크기로 저장합니다. 녹화·일시정지 중에도 손잡이나 테두리를 옮길 수 있습니다. 이동 범위는 같은 디스플레이 내부입니다.<br><br><b>녹화와 저장</b><br>첫 녹화 또는 설정 변경 시 실제 인코딩을 검사한 뒤 시작합니다. 녹화 중에는 작은 화면으로 바뀌며 화살표로 원래 화면에 돌아올 수 있습니다. 멈춘 시간은 영상과 소리에서 제외됩니다. 버튼 밖의 빈 공간은 어디서든 드래그할 수 있습니다. 타이머 옆의 용량은 현재까지의 영상과 최종 AAC 트랙에 대한 예상 파일 크기입니다. RAM 사용량이나 복구 원본을 합친 디스크 점유량이 아니며, 인코더 버퍼와 헤더 때문에 최종 크기와 차이가 있습니다.<br><br><b>저장 위치 · 편집</b><br>파일 메뉴나 하단 폴더 버튼에서 저장 폴더를 고릅니다. 기본 형식은 MP4입니다. 녹화 종료 후 저장 창에서 이름과 위치를 정하고, 필요한 경우 편집을 엽니다. 편집을 닫으면 저장 창으로 돌아옵니다. 같은 이름의 파일은 덮어쓰기를 확인합니다. 나중에 저장해도 세션 폴더의 자동 저장 파일은 유지됩니다. 편집본은 새 파일 또는 원본 덮어쓰기를 선택합니다. 복구용 원본 영상과 독립 WAV가 세션 폴더에 남습니다." : "<b>녹음할 소리 선택</b><br>마이크와 컴퓨터 소리 선택기를 눌러 실제 장치나 앱을 고릅니다. 처음에는 사용 안 함 상태입니다. 전체 출력 장치와 앱별 소리는 중복 선택하지 않습니다.<br><br><b>녹화용 믹서</b><br>상세 패널의 마이크 / 컴퓨터 탭에서 각각 음량과 음소거를 조절합니다. 운영체제의 음량 설정은 바꾸지 않습니다. 녹화 중에는 기존 소리의 음량·음소거만 바꿀 수 있습니다. 음소거로 저장한 구간은 나중에 복원할 수 없습니다.<br><br><b>소리 확인</b><br>소리 테스트는 선택한 소리를 5초 동안 녹음합니다. 샘플 듣기를 직접 누른 경우에만 소리를 재생합니다. 앱이 목록에 없으면 해당 앱에서 소리를 재생해 주세요. 연결이 끊긴 장치는 선택이 해제됩니다.<br><br><b>장치와 권한</b><br>마이크·화면 녹화 권한이 필요할 수 있습니다. macOS 마이크는 현재 시스템 기본 입력을 사용합니다."
+                        text: helpTabs.currentIndex === 1 ? "<b>화면 선택</b><br>화면과 창 목록은 자동으로 갱신됩니다. 대상을 고른 뒤 연결하세요. 오른쪽 패널 아이콘에서 상세 설정을 엽니다.<br><br><b>영역 녹화</b><br>영역 선택 후 드래그하면 선택한 픽셀 크기로 저장합니다. 녹화·일시정지 중에도 손잡이나 테두리를 옮길 수 있습니다. 이동 범위는 같은 디스플레이 내부입니다.<br><br><b>녹화와 저장</b><br>첫 녹화 또는 설정 변경 시 실제 인코딩을 검사한 뒤 시작합니다. 녹화 중에는 작은 화면으로 바뀌며 화살표로 원래 화면에 돌아올 수 있습니다. 멈춘 시간은 영상과 소리에서 제외됩니다. 버튼 밖의 빈 공간은 어디서든 드래그할 수 있습니다. 타이머 옆의 용량은 현재까지의 영상과 최종 AAC 트랙에 대한 예상 파일 크기입니다. RAM 사용량이나 복구 원본을 합친 디스크 점유량이 아니며, 인코더 버퍼와 헤더 때문에 최종 크기와 차이가 있습니다.<br><br><b>저장 위치 · 편집</b><br>파일 메뉴나 하단 폴더 버튼에서 저장 폴더를 고릅니다. 기본 형식은 MP4입니다. 녹화 종료 후 저장 창에서 이름과 위치를 정하고, 필요한 경우 편집을 엽니다. 편집을 닫으면 저장 창으로 돌아옵니다. 같은 이름의 파일은 덮어쓰기를 확인합니다. 파일명은 녹화 시작 시간이며 바꿀 수 있습니다. 영상은 지정 폴더에 직접 저장하고 하위 폴더를 만들지 않습니다. 나중에 저장하면 종료 시 저장 여부를 다시 묻습니다. 편집본은 새 파일 또는 원본 덮어쓰기를 선택합니다. 복구용 영상과 독립 WAV는 앱 전용 Recovery 경로에 남으며 파일 메뉴의 복구 파일 열기에서 확인합니다." : "<b>녹음할 소리 선택</b><br>마이크와 컴퓨터 소리 선택기를 눌러 실제 장치나 앱을 고릅니다. 처음에는 사용 안 함 상태입니다. 전체 출력 장치와 앱별 소리는 중복 선택하지 않습니다.<br><br><b>녹화용 믹서</b><br>상세 패널의 마이크 / 컴퓨터 탭에서 각각 음량과 음소거를 조절합니다. 운영체제의 음량 설정은 바꾸지 않습니다. 녹화 중에는 기존 소리의 음량·음소거만 바꿀 수 있습니다. 음소거로 저장한 구간은 나중에 복원할 수 없습니다.<br><br><b>소리 확인</b><br>소리 테스트는 선택한 소리를 5초 동안 녹음합니다. 샘플 듣기를 직접 누른 경우에만 소리를 재생합니다. 앱이 목록에 없으면 해당 앱에서 소리를 재생해 주세요. 연결이 끊긴 장치는 선택이 해제됩니다.<br><br><b>장치와 권한</b><br>마이크·화면 녹화 권한이 필요할 수 있습니다. macOS 마이크는 현재 시스템 기본 입력을 사용합니다."
                     }
                 }
             }
@@ -1467,15 +1495,21 @@ ApplicationWindow {
         id: recordingSave
         objectName: "recordingSave"
         property url folder
+        property string preparedFor: ""
         function prepare() {
-            folder = recorder.recordingFile.folder;
-            recordingName.text = recorder.recordingFile.name;
+            var recordingKey = recorder.recordingFile.folder.toString();
+            if (preparedFor !== recordingKey) {
+                preparedFor = recordingKey;
+                folder = recorder.outputFolder;
+                recordingName.text = recorder.recordingFile.name;
+            }
             open();
         }
         anchors.centerIn: parent
         width: Math.min(540, root.width - 48)
         title: recorder.state === "exporting" ? "영상 저장 중…" : "녹화 저장"
         closePolicy: root.idle ? Popup.CloseOnEscape : Popup.NoAutoClose
+        onRejected: root.closeAfterSave = false
         contentItem: ColumnLayout {
             spacing: 16
             Caption {
@@ -1521,7 +1555,10 @@ ApplicationWindow {
                 ActionButton {
                     text: "나중에"
                     enabled: root.idle
-                    onClicked: recordingSave.close()
+                    onClicked: {
+                        root.closeAfterSave = false;
+                        recordingSave.close();
+                    }
                 }
                 Item {
                     Layout.fillWidth: true
@@ -1551,6 +1588,7 @@ ApplicationWindow {
     }
     QuietDialog {
         id: recordingOverwrite
+        onRejected: root.closeAfterSave = false
         objectName: "recordingOverwrite"
         anchors.centerIn: parent
         width: Math.min(440, root.width - 48)
@@ -1559,7 +1597,10 @@ ApplicationWindow {
             ActionButton {
                 objectName: "cancelRecordingOverwrite"
                 text: "취소"
-                onClicked: recordingOverwrite.close()
+                onClicked: {
+                    root.closeAfterSave = false;
+                    recordingOverwrite.close();
+                }
             }
             Item {
                 Layout.fillWidth: true
@@ -1804,7 +1845,56 @@ ApplicationWindow {
         }
     }
     QuietDialog {
+        id: unsavedExit
+        objectName: "unsavedExit"
+        anchors.centerIn: parent
+        width: Math.min(520, root.width - 48)
+        title: "저장하지 않은 녹화가 있습니다"
+        onRejected: root.closeAfterSave = false
+        contentItem: ColumnLayout {
+            spacing: 16
+            Caption {
+                Layout.fillWidth: true
+                text: recorder.recordingFile.name
+                elide: Text.ElideMiddle
+            }
+            RowLayout {
+                ActionButton {
+                    objectName: "cancelUnsavedExit"
+                    text: "취소"
+                    onClicked: {
+                        root.closeAfterSave = false;
+                        unsavedExit.close();
+                    }
+                }
+                ActionButton {
+                    objectName: "exitWithoutSaving"
+                    text: "저장하지 않고 종료"
+                    onClicked: {
+                        unsavedExit.close();
+                        recorder.leaveRecordingUnsaved();
+                        root.closeAfterSave = false;
+                        root.close();
+                    }
+                }
+                ActionButton {
+                    objectName: "saveBeforeExit"
+                    text: "저장 후 종료"
+                    primary: true
+                    onClicked: {
+                        unsavedExit.close();
+                        root.closeAfterSave = true;
+                        editor.returnToSave = false;
+                        editor.close();
+                        recorder.requestRecordingSave();
+                    }
+                }
+            }
+        }
+    }
+    QuietDialog {
         id: closeDialog
+        onRejected: root.closeAfterSave = false
         anchors.centerIn: parent
         modal: true
         title: "작업을 마친 뒤 종료할까요?"
@@ -1822,10 +1912,13 @@ ApplicationWindow {
             RowLayout {
                 ActionButton {
                     text: "계속 사용"
-                    onClicked: closeDialog.close()
+                    onClicked: {
+                        root.closeAfterSave = false;
+                        closeDialog.close();
+                    }
                 }
                 ActionButton {
-                    text: "저장 후 종료"
+                    text: "작업 마치고 저장"
                     primary: true
                     onClicked: {
                         root.closeAfterSave = true;

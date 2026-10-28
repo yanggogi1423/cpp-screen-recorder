@@ -8,6 +8,7 @@
 #include <QAudioSink>
 #include <QBuffer>
 #include <QDir>
+#include <QDateTime>
 #include <QFile>
 #include <QFontDatabase>
 #include <QGuiApplication>
@@ -370,6 +371,68 @@ int main(int argc, char **argv) {
                         fail("Stop must show saving first and hide/reset the idle timer");
                         return;
                     }
+                    if (!controller.hasUnsavedRecording() ||
+                        dialog->property("folder").toUrl() != controller.outputFolder() ||
+                        !QDateTime::fromString(
+                             QFileInfo(controller.lastFile().toLocalFile()).completeBaseName(),
+                             "yyyy-MM-dd_HH-mm-ss-zzz")
+                             .isValid()) {
+                        fail("Saving must default to the chosen folder and recording start time");
+                        return;
+                    }
+                    auto *window = qobject_cast<QQuickWindow *>(root);
+                    if (window->close()) {
+                        fail("Closing with an unsaved recording was not blocked");
+                        return;
+                    }
+                    auto *exitDialog = root->findChild<QObject *>("unsavedExit");
+                    if (!exitDialog->property("visible").toBool()) {
+                        fail("Unsaved close did not ask for confirmation");
+                        return;
+                    }
+                    window->grabWindow().save("artifacts/unsaved-exit.png");
+                    QMetaObject::invokeMethod(root->findChild<QObject *>("cancelUnsavedExit"),
+                                              "clicked");
+                    if (!controller.hasUnsavedRecording() || !window->isVisible()) {
+                        fail("Canceling exit lost the unsaved recording");
+                        return;
+                    }
+                    const auto suggestedName =
+                        QFileInfo(controller.lastFile().toLocalFile()).completeBaseName() +
+                        "_saved.mp4";
+                    auto *nameField = root->findChild<QObject *>("recordingName");
+                    nameField->setProperty("text", suggestedName);
+                    window->close();
+                    QMetaObject::invokeMethod(root->findChild<QObject *>("saveBeforeExit"),
+                                              "clicked");
+                    if (!root->property("closeAfterSave").toBool() || !window->isVisible() ||
+                        nameField->property("text").toString() != suggestedName) {
+                        fail("Save-before-exit must retain the chosen name and wait for saving");
+                        return;
+                    }
+                    nameField->setProperty("text", "invalid/name.mp4");
+                    QMetaObject::invokeMethod(root->findChild<QObject *>("saveRecording"),
+                                              "clicked");
+                    if (root->property("closeAfterSave").toBool() ||
+                        !controller.hasUnsavedRecording() || controller.message().isEmpty()) {
+                        fail(
+                            "Failed save-before-exit must retain the recording and cancel closing");
+                        return;
+                    }
+                    nameField->setProperty("text", suggestedName);
+                    controller.clearMessage();
+                    root->setProperty("closeAfterSave", true);
+                    QMetaObject::invokeMethod(dialog, "reject");
+                    if (root->property("closeAfterSave").toBool() ||
+                        !controller.hasUnsavedRecording()) {
+                        fail("Canceling save-before-exit must cancel closing and retain the clip");
+                        return;
+                    }
+                    controller.toggleRecording();
+                    if (controller.state() != "idle" || !controller.hasUnsavedRecording()) {
+                        fail("Starting another capture must not replace the unsaved recording");
+                        return;
+                    }
                     qobject_cast<QQuickWindow *>(root)->grabWindow().save(
                         "artifacts/recording-save.png");
                     QMetaObject::invokeMethod(root->findChild<QObject *>("editBeforeSave"),
@@ -386,8 +449,6 @@ int main(int argc, char **argv) {
                                 fail("Closing the editor did not return to saving");
                                 return;
                             }
-                            root->findChild<QObject *>("recordingName")
-                                ->setProperty("text", "recording_saved.mp4");
                             QMetaObject::invokeMethod(root->findChild<QObject *>("saveRecording"),
                                                       "clicked");
                         });
@@ -395,6 +456,12 @@ int main(int argc, char **argv) {
                 });
             });
         QObject::connect(&controller, &RecorderController::recordingSaved, &app, [&] {
+            if (controller.hasUnsavedRecording() ||
+                QFileInfo(controller.lastFile().toLocalFile()).absolutePath() !=
+                    QDir(controller.outputFolder().toLocalFile()).absolutePath()) {
+                fail("Saving must clear pending state and write directly into the chosen folder");
+                return;
+            }
             QFile out("artifacts/region-result.json");
             out.open(QIODevice::WriteOnly);
             out.write(
@@ -404,6 +471,8 @@ int main(int argc, char **argv) {
                                           {"dragVerified", true},
                                           {"saveFlowVerified", true},
                                           {"idleTimerVerified", true},
+                                          {"unsavedExitVerified", true},
+                                          {"flatOutputVerified", true},
                                           {"hotkeysVerified", controller.globalHotkeysAvailable()}})
                     .toJson());
             app.exit(0);
@@ -620,7 +689,7 @@ int main(int argc, char **argv) {
                 auto *menu = engine.rootObjects().first()->findChild<QObject *>("mainMenu");
                 if (controller.optimized() || !controller.expanded() || !menu ||
                     !menu->property("visible").toBool() || !file.endsWith(".mp4") ||
-                    !file.startsWith(controller.outputFolder().toLocalFile() + "/")) {
+                    !controller.hasUnsavedRecording()) {
                     fail("Final MP4 folder or restored expanded mode/menu is incorrect");
                     return;
                 }
@@ -762,6 +831,8 @@ int main(int argc, char **argv) {
                         settings.delaySeconds = 0;
                         settings.outputFolder =
                             QDir::current().absoluteFilePath("artifacts/recordings");
+                        settings.recoveryFolder =
+                            QDir::current().absoluteFilePath("artifacts/capture-work");
                         QList<luma::AudioSource> audio{
                             {QString::number(tone1->processId()), "Tone440", "test",
                              luma::AudioKind::Application, quint32(tone1->processId()), mix1},
