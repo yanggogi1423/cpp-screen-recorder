@@ -36,4 +36,6 @@ if($Deploy){
         Copy-Item -LiteralPath (Join-Path $root 'tools/ffmpeg/LICENSE.txt') -Destination (Join-Path $bundle 'FFmpeg-LICENSE.txt') -Force
     }
     Copy-Item -LiteralPath (Join-Path $root 'THIRD_PARTY_NOTICES.md') -Destination $bundle -Force
+    & (Join-Path $bundle 'bin/FARecorderUpdater.exe') --write-manifest $bundle
+    if($LASTEXITCODE -ne 0){throw 'Update manifest generation failed.'}
 }

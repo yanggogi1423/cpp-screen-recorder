@@ -3,6 +3,8 @@
 #include "RegionFixture.h"
 #include "DiscoveryFixture.h"
 #include "core/RegionGeometry.h"
+#include "updates/UpdateManager.h"
+#include "QuitGuard.h"
 #include <QMouseEvent>
 #include <QAudioFormat>
 #include <QAudioSink>
@@ -54,12 +56,31 @@ int main(int argc, char **argv) {
     app.setFont(QFont("D2Coding"));
     QQuickStyle::setStyle("Basic");
     const auto arguments = app.arguments();
+    if (arguments.contains("--native-probe")) {
+        try {
+            luma::Settings settings;
+            settings.width = arguments.value(2).toInt();
+            settings.height = arguments.value(3).toInt();
+            settings.fps = arguments.value(4).toInt();
+            settings.outputFolder = "probe";
+            settings.encoder = "native_gpu";
+            settings.validate();
+            QTemporaryDir directory;
+            if (!directory.isValid())
+                throw std::runtime_error("임시 폴더를 만들 수 없습니다.");
+            luma::probeNativeVideoEncoder(settings, directory.filePath("probe.mp4"));
+            return 0;
+        } catch (const std::exception &error) {
+            qWarning("%s", error.what());
+            return 47;
+        }
+    }
     const bool testing =
         arguments.contains("--ui-smoke") || arguments.contains("--capture-test") ||
         arguments.contains("--edit-test") || arguments.contains("--workflow-test") ||
         arguments.contains("--encoder-test") || arguments.contains("--settings-test") ||
         arguments.contains("--region-test") || arguments.contains("--discovery-test") ||
-        arguments.contains("--window-test");
+        arguments.contains("--window-test") || arguments.contains("--update-check-test");
     if (testing) {
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(
@@ -168,6 +189,36 @@ int main(int argc, char **argv) {
     }
     auto *preview = new PreviewProvider;
     RecorderController controller(preview);
+    UpdateManager updater(!testing);
+    if (arguments.contains("--update-check-test")) {
+        QObject::connect(&updater, &UpdateManager::changed, &app, [&] {
+            if (QStringList{"current", "available", "error"}.contains(updater.state())) {
+                QDir().mkpath("artifacts");
+                QFile result("artifacts/update-check-result.json");
+                result.open(QIODevice::WriteOnly);
+                result.write(QJsonDocument(QJsonObject{{"state", updater.state()},
+                                                       {"message", updater.message()},
+                                                       {"version", updater.version()}})
+                                 .toJson());
+                app.exit(updater.state() == "error" ? 48 : 0);
+            }
+        });
+        QTimer::singleShot(0, &updater, [&] { updater.check(); });
+        QTimer::singleShot(35000, &app, [&] { app.exit(49); });
+        return app.exec();
+    }
+    auto updateAllowed = [&] {
+        updater.setAllowed(controller.state() == "idle" && !controller.hasUnsavedRecording() &&
+                           !controller.audioTestActive());
+    };
+    QObject::connect(&controller, &RecorderController::stateChanged, &updater, updateAllowed);
+    QObject::connect(&controller, &RecorderController::unsavedChanged, &updater, updateAllowed);
+    QObject::connect(&controller, &RecorderController::audioTestChanged, &updater, updateAllowed);
+    updateAllowed();
+    QObject::connect(&updater, &UpdateManager::changed, &controller, [&] {
+        controller.setUpdateBlocked(updater.state() == "preparing" ||
+                                    updater.state() == "installing");
+    });
     if (arguments.contains("--populated"))
         controller.configureUiFixture();
     if (arguments.contains("--expanded"))
@@ -183,12 +234,18 @@ int main(int argc, char **argv) {
     QQmlApplicationEngine engine;
     engine.addImageProvider("preview", preview);
     engine.rootContext()->setContextProperty("recorder", &controller);
+    engine.rootContext()->setContextProperty("updater", &updater);
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
         [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("Luma", "Main");
     if (engine.rootObjects().isEmpty())
         return 1;
+    QuitGuard quitGuard(qobject_cast<QWindow *>(engine.rootObjects().first()), [&] {
+        return controller.state() != "idle" || controller.hasUnsavedRecording() ||
+               updater.state() == "preparing";
+    });
+    app.installEventFilter(&quitGuard);
     if (arguments.contains("--window-test")) {
         auto *root = engine.rootObjects().first();
         auto *window = qobject_cast<QQuickWindow *>(root);
@@ -260,6 +317,7 @@ int main(int argc, char **argv) {
     if (arguments.contains("--region-test")) {
 #ifdef Q_OS_WIN
         QDir().mkpath("artifacts");
+        QFile::remove("artifacts/region-result.json");
         QFile::remove("artifacts/region-error.txt");
         auto fixture = std::make_shared<RegionFixture>();
         fixture->show();
@@ -289,11 +347,13 @@ int main(int argc, char **argv) {
             QCoreApplication::sendEvent(frame, &release);
         };
         auto started = std::make_shared<bool>(false);
+        auto readbackBaseline = std::make_shared<quint64>(0);
+        auto compactReadbacks = std::make_shared<quint64>(0);
         const auto uiThread = GetCurrentThreadId();
         auto hotkey = [uiThread](int id) { PostThreadMessage(uiThread, WM_HOTKEY, WPARAM(id), 0); };
         QObject::connect(
             &controller, &RecorderController::stateChanged, &app,
-            [&, fixture, frame, fail, drag, started, hotkey] {
+            [&, fixture, frame, fail, drag, started, hotkey, readbackBaseline, compactReadbacks] {
                 if (controller.state() != "recording" || *started)
                     return;
                 *started = true;
@@ -312,7 +372,8 @@ int main(int argc, char **argv) {
                     }
                     frame->grabWindow().save("artifacts/region-frame.png");
                 });
-                QTimer::singleShot(450, &app, [&, fail] {
+                QTimer::singleShot(450, &app, [&, fail, readbackBaseline] {
+                    *readbackBaseline = controller.captureReadbacks();
                     auto *root = engine.rootObjects().first();
                     auto *help = root->findChild<QObject *>("helpDialog");
                     auto *window = qobject_cast<QQuickWindow *>(root);
@@ -335,7 +396,13 @@ int main(int argc, char **argv) {
                         fail("Dragging while paused did not translate the crop");
                 });
                 QTimer::singleShot(1700, &app, [hotkey] { hotkey(GlobalHotkeys::PauseId); });
-                QTimer::singleShot(2450, &app, [&, fail] {
+                QTimer::singleShot(2450, &app, [&, fail, readbackBaseline, compactReadbacks] {
+                    *compactReadbacks = controller.captureReadbacks() - *readbackBaseline;
+                    if (arguments.contains("--native-gpu") &&
+                        controller.captureReadbacks() != *readbackBaseline) {
+                        fail("Native compact recording performed CPU pixel readback");
+                        return;
+                    }
                     if (controller.estimatedSize() == luma::recordingSizeText(0)) {
                         fail("Live file estimate did not update from the encoded video");
                         return;
@@ -397,6 +464,16 @@ int main(int argc, char **argv) {
                         fail("Canceling exit lost the unsaved recording");
                         return;
                     }
+                    QEvent quitEvent(QEvent::Quit);
+                    QCoreApplication::sendEvent(&app, &quitEvent);
+                    QCoreApplication::processEvents();
+                    if (!exitDialog->property("visible").toBool() ||
+                        !controller.hasUnsavedRecording()) {
+                        fail("Application Quit bypassed the unsaved confirmation");
+                        return;
+                    }
+                    QMetaObject::invokeMethod(root->findChild<QObject *>("cancelUnsavedExit"),
+                                              "clicked");
                     const auto suggestedName =
                         QFileInfo(controller.lastFile().toLocalFile()).completeBaseName() +
                         "_saved.mp4";
@@ -455,17 +532,19 @@ int main(int argc, char **argv) {
                     });
                 });
             });
-        QObject::connect(&controller, &RecorderController::recordingSaved, &app, [&] {
-            if (controller.hasUnsavedRecording() ||
-                QFileInfo(controller.lastFile().toLocalFile()).absolutePath() !=
-                    QDir(controller.outputFolder().toLocalFile()).absolutePath()) {
-                fail("Saving must clear pending state and write directly into the chosen folder");
-                return;
-            }
-            QFile out("artifacts/region-result.json");
-            out.open(QIODevice::WriteOnly);
-            out.write(
-                QJsonDocument(QJsonObject{{"file", controller.lastFile().toLocalFile()},
+        QObject::connect(
+            &controller, &RecorderController::recordingSaved, &app, [&, compactReadbacks] {
+                if (controller.hasUnsavedRecording() ||
+                    QFileInfo(controller.lastFile().toLocalFile()).absolutePath() !=
+                        QDir(controller.outputFolder().toLocalFile()).absolutePath()) {
+                    fail("Saving must clear pending state and write directly into the chosen "
+                         "folder");
+                    return;
+                }
+                QFile out("artifacts/region-result.json");
+                out.open(QIODevice::WriteOnly);
+                out.write(QJsonDocument(
+                              QJsonObject{{"file", controller.lastFile().toLocalFile()},
                                           {"width", controller.settings().value("width").toInt()},
                                           {"height", controller.settings().value("height").toInt()},
                                           {"dragVerified", true},
@@ -473,10 +552,12 @@ int main(int argc, char **argv) {
                                           {"idleTimerVerified", true},
                                           {"unsavedExitVerified", true},
                                           {"flatOutputVerified", true},
+                                          {"nativeGpu", arguments.contains("--native-gpu")},
+                                          {"compactCpuReadbacks", double(*compactReadbacks)},
                                           {"hotkeysVerified", controller.globalHotkeysAvailable()}})
-                    .toJson());
-            app.exit(0);
-        });
+                              .toJson());
+                app.exit(0);
+            });
         QTimer::singleShot(800, &app, [&, fixture, fail, hotkey] {
             if (!controller.globalHotkeysAvailable()) {
                 fail(controller.hotkeyStatus());
@@ -494,6 +575,8 @@ int main(int argc, char **argv) {
                 luma::regionFromLogical(QRectF(fixture->x() + 32, fixture->y() + 32, 160, 120),
                                         fixture->geometry(), pixels);
             controller.configureRegionTest(source, crop);
+            if (arguments.contains("--native-gpu"))
+                controller.setSetting("encoder", "native_gpu");
             QMetaObject::invokeMethod(
                 engine.rootObjects().first()->findChild<QObject *>("helpDialog"), "open");
             if (controller.settings().value("width").toInt() != crop.width() ||
@@ -1072,6 +1155,13 @@ int main(int argc, char **argv) {
                 return;
             }
             QMetaObject::invokeMethod(licenses, "close");
+            auto *updates = root->findChild<QObject *>("updateDialog");
+            QMetaObject::invokeMethod(root->findChild<QObject *>("updateAction"), "trigger");
+            if (!updates || !updates->property("visible").toBool()) {
+                app.exit(50);
+                return;
+            }
+            QMetaObject::invokeMethod(updates, "close");
             auto *about = root->findChild<QObject *>("aboutDialog");
             auto *aboutAction = root->findChild<QObject *>("aboutAction");
             if (arguments.contains("--review")) {
@@ -1080,7 +1170,8 @@ int main(int argc, char **argv) {
                                                    {"microphoneChoices", "microphones"},
                                                    {"computerChoices", "computer-audio"},
                                                    {"helpDialog", "shortcuts"},
-                                                   {"licenseDialog", "licenses"}});
+                                                   {"licenseDialog", "licenses"},
+                                                   {"updateDialog", "updates"}});
                 auto index = std::make_shared<int>(0);
                 auto timer = new QTimer(&app);
                 timer->setInterval(500);

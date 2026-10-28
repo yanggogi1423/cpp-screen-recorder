@@ -68,7 +68,8 @@ struct Settings {
             throw std::runtime_error("시작 지연은 0~60초로 입력해 주세요.");
         if (container != "mkv" && container != "mp4")
             throw std::runtime_error("저장 형식을 확인해 주세요.");
-        if (!QStringList{"libx264", "h264_nvenc", "h264_qsv", "h264_amf", "h264_videotoolbox"}
+        if (!QStringList{"libx264", "h264_nvenc", "h264_qsv", "h264_amf", "h264_videotoolbox",
+                         "native_gpu"}
                  .contains(encoder))
             throw std::runtime_error("지원하지 않는 인코더입니다.");
         if (outputFolder.trimmed().isEmpty())

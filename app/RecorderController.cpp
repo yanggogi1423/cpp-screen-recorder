@@ -374,7 +374,7 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
     const auto args = QCoreApplication::arguments();
     automaticDiscovery_ = std::none_of(args.begin(), args.end(), [](const auto &arg) {
         return QStringList{"--ui-smoke",  "--workflow-test", "--capture-test",  "--region-test",
-                           "--edit-test", "--encoder-test",  "--settings-test", "--window-test"}
+                           "--edit-test", "--encoder-test",  "--settings-test", "--window-test", "--update-check-test"}
             .contains(arg);
     });
     if (automaticDiscovery_) {
@@ -835,6 +835,8 @@ void RecorderController::saveSettings() {
         store.setValue(it.key(), it.value());
 }
 void RecorderController::toggleRecording() {
+    if (updateBlocked_)
+        return;
     if (state_ == "checking") {
         tracePreflight("cancel via record action");
         probeCancelled_ = true;
@@ -921,6 +923,8 @@ QList<luma::AudioSource> RecorderController::selectedSources() const {
     return result;
 }
 void RecorderController::toggleAudioTest() {
+    if (updateBlocked_)
+        return;
     if (audioCheck_.active()) {
         audioCheck_.requestStop();
         return;
@@ -979,8 +983,13 @@ void RecorderController::checkEncoder() {
     probingFingerprint_ = encoderFingerprint();
     setState("checking");
     emit encoderChanged();
-    encoderProbe_.start(luma::RecordingSession::ffmpegPath(),
-                        luma::RecordingSession::probeArguments(settings_));
+    if (settings_.encoder == "native_gpu")
+        encoderProbe_.start(QCoreApplication::applicationFilePath(),
+                            {"--native-probe", QString::number(settings_.width),
+                             QString::number(settings_.height), QString::number(settings_.fps)});
+    else
+        encoderProbe_.start(luma::RecordingSession::ffmpegPath(),
+                            luma::RecordingSession::probeArguments(settings_));
     tracePreflight("launch " + encoderFingerprint());
     encoderTimeout_.start();
 }
@@ -1042,6 +1051,8 @@ void RecorderController::openOutputFolder() {
         showMessage("녹화 폴더를 열 수 없습니다. 저장 위치를 확인해 주세요.");
 }
 void RecorderController::openRecording(QUrl file) {
+    if (updateBlocked_)
+        return;
     if (state_ != "idle" || !file.isLocalFile() || !QFileInfo::exists(file.toLocalFile()))
         return;
     if (unsavedRecording_) {

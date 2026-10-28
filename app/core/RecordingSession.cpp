@@ -137,19 +137,26 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
         if (first.isNull())
             throw std::runtime_error("미리보기가 준비된 뒤 녹화를 시작해 주세요.");
         const auto inputSize = first.size();
-        const auto rawVideo = QDir(folder).filePath("video.mkv");
+        const bool gpu = s.encoder == "native_gpu";
+        const auto rawVideo = QDir(folder).filePath(gpu ? "video.mp4" : "video.mkv");
+        const auto initialReadbacks = video->cpuReadbacks();
+        std::unique_ptr<NativeVideoEncoder> native;
         QFile log(QDir(folder).filePath("encoder.log"));
         log.open(QIODevice::WriteOnly);
-        encoder.setProgram(ffmpeg);
-        auto arguments = videoArguments(s, inputSize, rawVideo);
-        arguments.removeLast();
-        // Flush the recovery Matroska once per second so live size reflects
-        // encoded data instead of remaining at the header for several seconds.
-        arguments << "-cluster_time_limit" << "1000" << "-flush_packets" << "1" << rawVideo;
-        encoder.setArguments(arguments);
-        encoder.start();
-        if (!encoder.waitForStarted(5000))
-            throw std::runtime_error(encoder.errorString().toStdString());
+        if (gpu) {
+            native = video->createNativeEncoder(s, rawVideo);
+        } else {
+            encoder.setProgram(ffmpeg);
+            auto arguments = videoArguments(s, inputSize, rawVideo);
+            arguments.removeLast();
+            // Flush the recovery Matroska once per second so live size reflects
+            // encoded data instead of remaining at the header for several seconds.
+            arguments << "-cluster_time_limit" << "1000" << "-flush_packets" << "1" << rawVideo;
+            encoder.setArguments(arguments);
+            encoder.start();
+            if (!encoder.waitForStarted(5000))
+                throw std::runtime_error(encoder.errorString().toStdString());
+        }
         QJsonArray trackInfo;
         const qint64 origin = clockNs();
         timeline_.reset(origin);
@@ -206,48 +213,53 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
             }
-            auto image = video->latestFrame();
-            if (image.isNull()) {
-                warning = "녹화할 화면이 사라졌습니다.";
-                break;
-            }
-            if (image.cacheKey() == previous.cacheKey())
-                duplicateFrames++;
-            previous = image;
-            if (image.size() != inputSize)
-                image = image.scaled(inputSize, Qt::KeepAspectRatio, Qt::FastTransformation);
-            if (image.size() != inputSize) {
-                QImage canvas(inputSize, QImage::Format_ARGB32);
-                canvas.fill(Qt::black);
-                QPainter painter(&canvas);
-                painter.drawImage(0, 0, image);
-                painter.end();
-                image = canvas;
-            }
-            if (image.format() != QImage::Format_ARGB32)
-                image = image.convertToFormat(QImage::Format_ARGB32);
-            const auto bytes = image.sizeInBytes();
-            if (encoder.write(reinterpret_cast<const char *>(image.constBits()), bytes) != bytes)
-                throw std::runtime_error("인코더로 영상을 전달하지 못했습니다.");
-            while (encoder.bytesToWrite() > 0) {
-                if (!encoder.waitForBytesWritten(2000))
-                    throw std::runtime_error(
-                        ("인코더가 영상을 처리하지 못했습니다.\n" + QString::fromUtf8(tail))
-                            .toStdString());
+            if (native) {
+                native->append(frames_);
+            } else {
+                auto image = video->latestFrame();
+                if (image.isNull()) {
+                    warning = "녹화할 화면이 사라졌습니다.";
+                    break;
+                }
+                if (image.cacheKey() == previous.cacheKey())
+                    duplicateFrames++;
+                previous = image;
+                if (image.size() != inputSize)
+                    image = image.scaled(inputSize, Qt::KeepAspectRatio, Qt::FastTransformation);
+                if (image.size() != inputSize) {
+                    QImage canvas(inputSize, QImage::Format_ARGB32);
+                    canvas.fill(Qt::black);
+                    QPainter painter(&canvas);
+                    painter.drawImage(0, 0, image);
+                    painter.end();
+                    image = canvas;
+                }
+                if (image.format() != QImage::Format_ARGB32)
+                    image = image.convertToFormat(QImage::Format_ARGB32);
+                const auto bytes = image.sizeInBytes();
+                if (encoder.write(reinterpret_cast<const char *>(image.constBits()), bytes) !=
+                    bytes)
+                    throw std::runtime_error("인코더로 영상을 전달하지 못했습니다.");
+                while (encoder.bytesToWrite() > 0) {
+                    if (!encoder.waitForBytesWritten(2000))
+                        throw std::runtime_error(
+                            ("인코더가 영상을 처리하지 못했습니다.\n" + QString::fromUtf8(tail))
+                                .toStdString());
+                    const auto line = encoder.readAllStandardError();
+                    log.write(line);
+                    tail = (tail + line).right(5000);
+                }
                 const auto line = encoder.readAllStandardError();
                 log.write(line);
                 tail = (tail + line).right(5000);
+                if (encoder.state() == QProcess::NotRunning)
+                    throw std::runtime_error(
+                        ("인코더가 종료됐습니다.\n" + QString::fromUtf8(tail)).toStdString());
             }
             frames_++;
             if (frames_ % s.fps == 0)
                 estimatedBytes_ = estimatedRecordingBytes(QFileInfo(rawVideo).size(), frames_,
                                                           s.fps, int(sources.size()));
-            const auto line = encoder.readAllStandardError();
-            log.write(line);
-            tail = (tail + line).right(5000);
-            if (encoder.state() == QProcess::NotRunning)
-                throw std::runtime_error(
-                    ("인코더가 종료됐습니다.\n" + QString::fromUtf8(tail)).toStdString());
             if (timeline_.elapsed() - frames_.load() * 1000000000 / s.fps > 5000000000LL) {
                 warning =
                     "인코딩 속도가 부족합니다. GPU 인코더를 선택하거나 해상도·FPS를 낮춰 주세요.";
@@ -260,19 +272,27 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
         const auto duration = frames_.load() * 1000000000 / s.fps;
         for (auto &writer : writers)
             writer->finish(duration);
-        encoder.closeWriteChannel();
-        if (!encoder.waitForFinished(30000)) {
-            encoder.kill();
-            encoder.waitForFinished();
-            throw std::runtime_error(
-                "영상 저장 종료 시간이 초과됐습니다. 원본 파일을 보관했습니다.");
+        if (native) {
+            native->finish();
+            native.reset();
+        } else {
+            encoder.closeWriteChannel();
+            if (!encoder.waitForFinished(30000)) {
+                encoder.kill();
+                encoder.waitForFinished();
+                throw std::runtime_error(
+                    "영상 저장 종료 시간이 초과됐습니다. 원본 파일을 보관했습니다.");
+            }
+            log.write(encoder.readAllStandardError());
+            log.close();
+            if (encoder.exitCode() != 0 || frames_ == 0)
+                throw std::runtime_error(
+                    ("영상 저장에 실패했습니다. encoder.log를 확인해 주세요.\n" +
+                     QString::fromUtf8(tail))
+                        .toStdString());
         }
-        log.write(encoder.readAllStandardError());
-        log.close();
-        if (encoder.exitCode() != 0 || frames_ == 0)
-            throw std::runtime_error(("영상 저장에 실패했습니다. encoder.log를 확인해 주세요.\n" +
-                                      QString::fromUtf8(tail))
-                                         .toStdString());
+        if (frames_ == 0)
+            throw std::runtime_error("저장할 영상 프레임이 없습니다.");
         estimatedBytes_ = estimatedRecordingBytes(QFileInfo(rawVideo).size(), frames_, s.fps,
                                                   int(sources.size()));
         const auto output = QDir(folder).filePath(recordingName + "." + s.container);
@@ -320,17 +340,21 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
         QFile manifest(QDir(folder).filePath("session.json"));
         if (manifest.open(QIODevice::WriteOnly))
             manifest.write(
-                QJsonDocument(QJsonObject{{"version", "0.1.0"},
-                                          {"width", s.width},
-                                          {"height", s.height},
-                                          {"fps", s.fps},
-                                          {"frames", double(frames_)},
-                                          {"duplicateFrames", double(duplicateFrames)},
-                                          {"durationSeconds", duration / 1e9},
-                                          {"tracks", trackInfo},
-                                          {"mixedPlaybackTrack", bool(offset)},
-                                          {"pausedSeconds", timeline_.pausedDuration() / 1e9},
-                                          {"warning", warning}})
+                QJsonDocument(
+                    QJsonObject{{"version", "0.1.0"},
+                                {"width", s.width},
+                                {"height", s.height},
+                                {"fps", s.fps},
+                                {"frames", double(frames_)},
+                                {"videoPipeline", gpu ? "native-gpu" : "cpu-pipe"},
+                                {"cpuReadbacks", double(video->cpuReadbacks() - initialReadbacks)},
+                                {"duplicateFrames",
+                                 gpu ? QJsonValue() : QJsonValue(double(duplicateFrames))},
+                                {"durationSeconds", duration / 1e9},
+                                {"tracks", trackInfo},
+                                {"mixedPlaybackTrack", bool(offset)},
+                                {"pausedSeconds", timeline_.pausedDuration() / 1e9},
+                                {"warning", warning}})
                     .toJson());
         emit finished(output, warning);
     } catch (const std::exception &ex) {

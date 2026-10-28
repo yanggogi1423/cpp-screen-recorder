@@ -1,4 +1,5 @@
 #include "core/Platform.h"
+#include "MacGpuEncoder.h"
 #import <AVFoundation/AVFoundation.h>
 #import <AppKit/AppKit.h>
 #import <CoreMedia/CoreMedia.h>
@@ -95,6 +96,9 @@ class MacVideo final : public VideoCapture {
     QImage image_;
     QImage fullFrame_;
     QRect crop_;
+    CVPixelBufferRef pixel_ = nullptr;
+    quint64 generation_ = 0, published_ = 0;
+    std::atomic<quint64> readbacks_{0};
 
   public:
     ~MacVideo() override {
@@ -121,14 +125,12 @@ class MacVideo final : public VideoCapture {
             auto pixel = CMSampleBufferGetImageBuffer(sample);
             if (!pixel)
                 return;
-            CVPixelBufferLockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly);
-            QImage view(static_cast<const uchar *>(CVPixelBufferGetBaseAddress(pixel)),
-                        int(CVPixelBufferGetWidth(pixel)), int(CVPixelBufferGetHeight(pixel)),
-                        qsizetype(CVPixelBufferGetBytesPerRow(pixel)), QImage::Format_ARGB32);
             std::lock_guard lock(mutex_);
-            fullFrame_ = view.copy();
-            image_ = crop_.isEmpty() ? fullFrame_ : fullFrame_.copy(crop_);
-            CVPixelBufferUnlockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly);
+            CVPixelBufferRetain(pixel);
+            if (pixel_)
+                CVPixelBufferRelease(pixel_);
+            pixel_ = pixel;
+            ++generation_;
         };
         stream_ = [[SCStream alloc] initWithFilter:filter configuration:config delegate:output_];
         NSError *failure = nil;
@@ -141,15 +143,36 @@ class MacVideo final : public VideoCapture {
     }
     QImage latestFrame() override {
         std::lock_guard lock(mutex_);
+        if (pixel_ && (published_ != generation_ || image_.isNull())) {
+            CVPixelBufferLockBaseAddress(pixel_, kCVPixelBufferLock_ReadOnly);
+            QImage view(static_cast<const uchar *>(CVPixelBufferGetBaseAddress(pixel_)),
+                        int(CVPixelBufferGetWidth(pixel_)), int(CVPixelBufferGetHeight(pixel_)),
+                        qsizetype(CVPixelBufferGetBytesPerRow(pixel_)), QImage::Format_ARGB32);
+            image_ = crop_.isEmpty() ? view.copy() : view.copy(crop_);
+            CVPixelBufferUnlockBaseAddress(pixel_, kCVPixelBufferLock_ReadOnly);
+            published_ = generation_;
+            ++readbacks_;
+        }
         return image_;
+    }
+    quint64 cpuReadbacks() const override {
+        return readbacks_.load();
+    }
+    std::unique_ptr<NativeVideoEncoder> createNativeEncoder(const Settings &settings,
+                                                            const QString &file) override {
+        return createMacGpuEncoder(
+            [this](const auto &consume) {
+                std::lock_guard lock(mutex_);
+                consume(pixel_, crop_);
+            },
+            settings, file);
     }
     void setRegion(const QRect &region) override {
         std::lock_guard lock(mutex_);
         if (crop_.isEmpty() || region.size() != crop_.size() || region.x() < 0 || region.y() < 0)
             throw std::runtime_error("녹화 중에는 영역 크기를 유지해야 합니다.");
         crop_ = region;
-        if (!fullFrame_.isNull())
-            image_ = fullFrame_.copy(crop_);
+        ++generation_;
     }
     void setCursor(bool enabled) override {
         if (stream_) {
@@ -172,6 +195,10 @@ class MacVideo final : public VideoCapture {
         std::lock_guard lock(mutex_);
         image_ = {};
         fullFrame_ = {};
+        if (pixel_)
+            CVPixelBufferRelease(pixel_);
+        pixel_ = nullptr;
+        published_ = generation_ = 0;
     }
 };
 

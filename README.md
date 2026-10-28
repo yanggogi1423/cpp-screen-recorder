@@ -4,11 +4,11 @@
 
 A modern desktop recorder built with **C++20 + Qt 6 / QML**, with native capture backends for Windows and macOS.
 
-**0.4.0-beta.3 Windows 베타를 배포합니다.** [다운로드 및 변경 내용](https://github.com/yanggogi1423/cpp-screen-recorder/releases/tag/v0.4.0-beta.3). 기능을 구현했다는 것과 실제 장비에서 검증했다는 것을 구분합니다. 최종 지원 상태와 테스트 증거는 [기능 점검표](docs/FEATURE_AUDIT.md)에 기록합니다. 베타(pre-release)이며 정식 안정 버전은 아닙니다.
+**0.5.0-beta.1 Windows 베타를 배포합니다.** [다운로드 및 변경 내용](https://github.com/yanggogi1423/cpp-screen-recorder/releases/tag/v0.5.0-beta.1). 기능을 구현했다는 것과 실제 장비에서 검증했다는 것을 구분합니다. 최종 지원 상태와 테스트 증거는 [기능 점검표](docs/FEATURE_AUDIT.md)에 기록합니다. 베타(pre-release)이며 정식 안정 버전은 아닙니다.
 
 ![간소화 화면](docs/images/main.png)
 
-[확장 화면](docs/images/expanded.png) · [녹화 중 최적 화면](docs/images/compact.png) · [녹화 저장](docs/images/save.png) · [프로그램 정보](docs/images/about.png) · [베타 3 검증](docs/VALIDATION-0.4-beta.3.md) · [UI 설계](docs/DESIGN.md)
+[확장 화면](docs/images/expanded.png) · [녹화 중 최적 화면](docs/images/compact.png) · [녹화 저장](docs/images/save.png) · [프로그램 정보](docs/images/about.png) · [0.5 검증](docs/VALIDATION-0.5.md) · [UI 설계](docs/DESIGN.md)
 
 ## 만들고 있는 경험
 
@@ -33,6 +33,8 @@ A modern desktop recorder built with **C++20 + Qt 6 / QML**, with native capture
 - 일시정지/재개: 멈춘 시간을 영상과 모든 오디오 트랙에서 함께 제외
 - 전역 시작/종료·일시정지 단축키 (도움말 → 단축키)
 - 창·앱·장치 목록 자동 갱신, 실제 이름을 보여 주는 오디오 선택기
+- GPU 직접 인코딩: Windows D3D11/Media Foundation, macOS Metal/VideoToolbox 경로
+- 도움말 → 업데이트: 자동 버전 확인, 안정/베타 채널, SHA256 검증 다운로드·교체·실패 복구
 - 한 줄 상단바와 오른쪽 패널 아이콘, 마이크/컴퓨터 소리 믹서 탭
 
 현재 macOS 마이크 경로는 시스템 기본 입력 장치 1개를 사용합니다. Windows는 입력 장치별로 선택할 수 있으며, macOS의 개별 입력 장치 선택은 보강 대상입니다.
@@ -54,11 +56,19 @@ Windows는 **Ctrl+R**로 시작/종료, **Ctrl+P**로 일시정지/재개합니�
 
 ## 오디오 저장과 믹서
 
-선택한 저장 폴더에는 시작 시간 기반 이름의 최종 MP4/MKV를 직접 저장합니다. 영상 원본 `video.mkv`, 개별 RF64 `.wav`, 작업 영상, 로그와 `session.json`은 앱의 로컬 데이터 `Recovery` 경로에 보관합니다. **파일 → 복구 파일 열기**로 접근할 수 있습니다. 미저장 상태로 명시적으로 종료해도 복구 데이터는 삭제하지 않습니다. RF64는 일반 WAV의 4 GiB 크기 한계를 피합니다. 미저장 녹화가 있으면 새 녹화나 다른 파일 열기보다 해당 저장을 먼저 완료하도록 안내합니다.
+선택한 저장 폴더에는 시작 시간 기반 이름의 최종 MP4/MKV를 직접 저장합니다. 영상 원본 `video.mkv`(CPU/FFmpeg) 또는 `video.mp4`(GPU 직접), 개별 RF64 `.wav`, 작업 영상, 로그와 `session.json`은 앱의 로컬 데이터 `Recovery` 경로에 보관합니다. **파일 → 복구 파일 열기**로 접근할 수 있습니다. 미저장 상태로 명시적으로 종료해도 복구 데이터는 삭제하지 않습니다. RF64는 일반 WAV의 4 GiB 크기 한계를 피합니다. 미저장 녹화가 있으면 새 녹화나 다른 파일 열기보다 해당 저장을 먼저 완료하도록 안내합니다.
 
 오디오가 2개 이상이면 일반 플레이어용 전체 믹스 트랙을 기본 트랙으로 추가하고, 독립 트랙도 함께 보관합니다. 멀티트랙을 지원하는 편집기에서 개별 트랙을 조절할 수 있습니다.
 
 녹화용 믹서는 녹음되는 PCM에 적용되며 운영체제 음량 설정을 바꾸지 않습니다. 뮤트한 구간은 해당 트랙에 무음으로 기록되므로 나중에 원래 소리를 복원할 수 없습니다. 중복 녹음을 막기 위해 시스템 전체 소리와 앱별 소리는 동시에 선택하지 않으며, 마이크는 어느 쪽과도 함께 선택할 수 있습니다.
+
+## GPU 직접 인코딩과 업데이트
+
+상세 패널 → 인코더 → **GPU 직접**을 선택합니다. 사용 중인 GPU/드라이버에서 실제 합성 프레임 검사 후 녹화합니다. 기존 CPU·FFmpeg 옵션도 유지하며 실패 시 자동으로 다른 인코더로 바꾸지는 않습니다.
+
+**도움말 → 업데이트**에서 자동 확인과 베타 포함 여부를 고릅니다. 현재 공개 GitHub Releases를 사용하므로 별도 서버가 필요하지 않습니다. 하루 단위 캐시·ETag·호출 한도 처리를 사용하며, 다운로드·SHA256 검증과 준비가 성공한 뒤에만 앱을 종료하고 교체합니다. 미저장 영상이 있으면 먼저 저장해야 합니다. 기존 버전은 백업합니다. [업데이트 정책](docs/UPDATES.md)
+
+0.4 버전에는 이 기능이 없으므로 **0.5 베타는 한 번 수동으로 설치**해야 합니다. macOS 코드는 CI 대상이며 실제 Mac의 GPU·권한·앱 교체 검증 전까지 실행 파일을 공개하지 않습니다.
 
 ## 개발 환경
 
@@ -120,8 +130,8 @@ macOS 빌드/기본 테스트/배포는 CI에서 통과했습니다. 물리 Mac�
 
 | 구분 | 현재 상태와 개선 가능성 |
 |---|---|
-| 구현상 성능 제약 | 캡처 프레임이 CPU 메모리와 FFmpeg 입력 파이프를 거칩니다. GPU 인코더를 선택해도 이 복사는 남으므로 GPU 표면을 직접 전달하는 경로로 개선할 수 있습니다. 고부하에서의 성능 열세 여부와 크기는 같은 장비·설정으로 비교 시험해야 합니다. |
-| 아직 구현하지 않은 기능 | HDR, 게임 후킹, 예약 종료, 웹캠/PIP, 주석, 노이즈 억제, 자동 업데이트 및 macOS 개별 입력 장치 선택은 보강 대상입니다. 장치의 근본적인 한계가 아닙니다. |
+| 인코딩 경로 | 상세 패널의 **GPU 직접**은 GPU 프레임을 네이티브 하드웨어 인코더로 넘기고, 작은 녹화 창에서 앱의 CPU 픽셀 읽기를 없앱니다. **CPU·NVIDIA/Intel/AMD FFmpeg** 선택지는 CPU 메모리/입력 파이프 경로입니다. 일반 화면의 미리보기는 계속 낮은 주기로 CPU에 읽습니다. 드라이버 내부 복사나 총 CPU 사용률 0%를 보장하지 않습니다. |
+| 아직 구현하지 않은 기능 | HDR, 게임 후킹, 예약 종료, 웹캠/PIP, 주석, 노이즈 억제 및 macOS 개별 입력 장치 선택은 보강 대상입니다. 장치의 근본적인 한계가 아닙니다. |
 | 공통 하드웨어 조건 | 해상도·FPS·인코더에 따른 처리량 차이와 GPU 인코더의 하드웨어·드라이버 요구는 다른 녹화 프로그램에도 있습니다. [OBS 하드웨어 인코딩 안내](https://obsproject.com/kb/hardware-encoding) |
 | 현재 OS 캡처 방식의 범위 | Windows 앱별 소리는 프로세스 트리 단위입니다. 이미 섞인 통화 참여자별 소리나 브라우저 탭의 의미를 이 경로만으로 분리하지 않습니다. 별도 앱·브라우저 연동이나 분리된 오디오 출력이 필요할 수 있으며 모든 녹화 프로그램에서 불가능하다는 뜻은 아닙니다. [Microsoft Application Loopback](https://learn.microsoft.com/en-us/samples/microsoft/windows-classic-samples/applicationloopbackaudio-sample/) |
 | 검증이 남은 부분 | 실제 Mac 녹화와 장시간·고부하·장치 재연결 등의 인수 검증입니다. 미검증과 동작 불가능을 구분합니다. |
@@ -130,7 +140,7 @@ macOS 빌드/기본 테스트/배포는 CI에서 통과했습니다. 물리 Mac�
 
 ## 제품 정보
 
-프로그램 이름은 **FARecorder**, 제작자 표기는 GitHub 저장소 소유자 **yanggogi1423**입니다. 도움말에 현재 버전과 마지막 코드 업데이트 날짜(2026-10-28), [저장소](https://github.com/yanggogi1423/cpp-screen-recorder) 링크를 표시합니다. 업데이트 날짜는 마지막 확인 시각이나 자동 업데이트 확인 결과가 아닙니다.
+프로그램 이름은 **FARecorder**, 제작자 표기는 GitHub 저장소 소유자 **yanggogi1423**입니다. 도움말에 현재 버전과 마지막 코드 업데이트 날짜(2026-10-29), [저장소](https://github.com/yanggogi1423/cpp-screen-recorder) 링크를 표시합니다. 업데이트 날짜는 마지막 확인 시각이나 자동 업데이트 확인 결과가 아닙니다.
 
 이전 Luma 설정은 처음 실행할 때 저장 폴더·해상도·FPS·화면 모드를 가져옵니다. 새 이름에서는 MP4를 기본으로 시작하며, 이후 확장 화면에서 직접 선택한 형식은 유지합니다. 내부 C++ namespace / QML URI `Luma`는 호환성을 위해 유지합니다.
 

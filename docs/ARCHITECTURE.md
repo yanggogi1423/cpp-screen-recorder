@@ -16,7 +16,7 @@ Platform / VideoCapture / AudioCapture interfaces
         + macOS: ScreenCaptureKit, AVFoundation microphone, AVAudioConverter
 ```
 
-The platform boundary produces BGRA frames and interleaved signed 16-bit stereo PCM at 48 kHz. Every audio packet has a timestamp in the shared monotonic clock domain. The RF64 writer inserts silence for gaps, trims overlapping packets and pads silent tails. OS APIs and permission handling stay in their platform modules.
+The CPU platform boundary produces immutable BGRA images on demand and interleaved signed 16-bit stereo PCM at 48 kHz. Native GPU encoders consume the retained platform surface instead of the CPU image. Every audio packet has a timestamp in the shared monotonic clock domain. The RF64 writer inserts silence for gaps, trims overlapping packets and pads silent tails. OS APIs and permission handling stay in their platform modules.
 
 `RecordingSession` owns a worker thread, the FFmpeg process and audio capture lifetimes. The GUI remains responsive while encoding and muxing. Capture source changes are locked while recording. Mix gains and mute use independent shared atomic state, so microphone and app routes can be adjusted while recording without changing the operating system's volume settings. Gain is applied to recorded PCM before track writing. Muting writes silence and keeps the track timeline intact; unprocessed audio is not retained.
 
@@ -32,15 +32,15 @@ The platform boundary produces BGRA frames and interleaved signed 16-bit stereo 
 
 ## Files and recovery
 
-Each recording gets a unique folder containing `video.mkv`, RF64 WAV tracks, `recording.mkv` or `recording.mp4`, logs and `session.json`. The final video has separately named AAC audio tracks. When two or more routes are selected, a default mixed playback track is also included for ordinary players, alongside the individual tracks.
+Each recording stages in the application-local Recovery area with `video.mkv` (CPU) or `video.mp4` (native GPU), RF64 WAV tracks, a start-time-named combined recording, logs and `session.json`. Save copies the combined video directly into the chosen destination without recording-specific subdirectories. Pending state clears only on confirmed save. The final video has separately named AAC audio tracks. When two or more routes are selected, a default mixed playback track is also included for ordinary players, alongside the individual tracks.
 
 The trim editor decodes and re-encodes the chosen interval, retaining every audio stream. Before exporting, the app explicitly asks whether to save a new file or overwrite the original combined video. Overwrite first generates a complete sibling temporary file, then uses `QSaveFile` for an atomic replacement. A failed export preserves the original. The separate WAV / `video.mkv` recovery sources are unaffected. Source deletion and intermediate-file cleanup require a later explicit product design.
 
 ## Current limits
 
-This is an alpha architecture and implementation, not a claim of production parity. The frame path currently reads GPU frames into CPU memory before FFmpeg. High-resolution/high-FPS selection is a request, not a guaranteed sustained frame rate. GPU encoder availability is determined by the installed hardware and driver; there is no silent fallback. WGC is window/display capture, not an injected game-hook backend. SDR BGRA is supported; HDR/10-bit is not.
+This is a beta architecture with explicit validation scope, not a claim of production parity. CPU/FFmpeg options read GPU frames on demand before the raw BGRA pipe. The native_gpu option uses D3D11 NV12 surfaces with a hardware-verified Media Foundation transform on Windows, or Metal/CoreImage plus hardware-required AVAssetWriter/VideoToolbox on macOS. Capture callbacks retain GPU surfaces; only preview/CPU callers perform readback. Compact mode stops preview readback. High-resolution/high-FPS selection is a request, not a guaranteed sustained frame rate. GPU encoder availability is determined by the installed hardware and driver; there is no silent fallback. WGC is window/display capture, not an injected game-hook backend. SDR BGRA is supported; HDR/10-bit is not.
 
-macOS code must compile in CI and pass physical-Mac permission, capture, timestamp and audio-device tests before it is called release-tested. Signing, notarization and installer/update channels are separate release work.
+macOS code must compile in CI and pass physical-Mac permission, capture, timestamp and audio-device tests before it is called release-tested. Signing, notarization and physical bundle-update validation remain separate release work. GitHub update discovery/download and a standalone swap/rollback helper are implemented; see UPDATES.md.
 
 ## Primary references
 

@@ -1,4 +1,5 @@
 #include "core/Platform.h"
+#include "WindowsGpuEncoder.h"
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <propkeydef.h>
@@ -11,6 +12,7 @@
 #include <audioclient.h>
 #include <audiopolicy.h>
 #include <d3d11.h>
+#include <d3d10.h>
 #include <dxgi.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <future>
@@ -91,6 +93,9 @@ class WinVideo final : public VideoCapture {
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
     ComPtr<ID3D11Texture2D> staging_;
+    ComPtr<ID3D11Texture2D> gpuFrame_;
+    quint64 generation_ = 0, published_ = 0;
+    std::atomic<quint64> readbacks_{0};
     IDirect3DDevice rtDevice_{nullptr};
     Direct3D11CaptureFramePool pool_{nullptr};
     GraphicsCaptureSession session_{nullptr};
@@ -100,10 +105,23 @@ class WinVideo final : public VideoCapture {
     // Caller holds mutex_. A translated crop must update even when a static
     // source has not produced another FrameArrived notification.
     void publishFrame() {
-        if (!staging_)
+        if (!gpuFrame_ || (published_ == generation_ && !latest_.isNull()))
             return;
         D3D11_TEXTURE2D_DESC desc;
-        staging_->GetDesc(&desc);
+        gpuFrame_->GetDesc(&desc);
+        D3D11_TEXTURE2D_DESC old{};
+        if (staging_)
+            staging_->GetDesc(&old);
+        if (!staging_ || old.Width != desc.Width || old.Height != desc.Height) {
+            staging_.Reset();
+            auto cpu = desc;
+            cpu.BindFlags = 0;
+            cpu.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            cpu.Usage = D3D11_USAGE_STAGING;
+            cpu.MiscFlags = 0;
+            check(device_->CreateTexture2D(&cpu, nullptr, &staging_));
+        }
+        context_->CopyResource(staging_.Get(), gpuFrame_.Get());
         D3D11_MAPPED_SUBRESOURCE mapped{};
         check(context_->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &mapped));
         QImage image(canvas_, QImage::Format_ARGB32);
@@ -120,6 +138,8 @@ class WinVideo final : public VideoCapture {
                            x * 4,
                        size_t(w) * 4);
         context_->Unmap(staging_.Get(), 0);
+        ++readbacks_;
+        published_ = generation_;
         std::lock_guard frameLock(frameMutex_);
         latest_ = std::move(image);
     }
@@ -153,10 +173,14 @@ class WinVideo final : public VideoCapture {
                                             guid_of<GraphicsCaptureItem>(), put_abi(item_)));
         const auto size = item_.Size();
         canvas_ = region.isEmpty() ? QSize(size.Width, size.Height) : region.size();
-        check(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-                                D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
-                                &device_, nullptr, &context_));
+        check(
+            D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                              D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+                              nullptr, 0, D3D11_SDK_VERSION, &device_, nullptr, &context_));
         ComPtr<IDXGIDevice> dxgi;
+        ComPtr<ID3D10Multithread> protection;
+        check(context_.As(&protection));
+        protection->SetMultithreadProtected(TRUE);
         check(device_.As(&dxgi));
         com_ptr<IInspectable> inspectable;
         check(CreateDirect3D11DeviceFromDXGIDevice(dxgi.Get(), inspectable.put()));
@@ -187,20 +211,20 @@ class WinVideo final : public VideoCapture {
                 D3D11_TEXTURE2D_DESC desc;
                 texture->GetDesc(&desc);
                 D3D11_TEXTURE2D_DESC old{};
-                if (staging_)
-                    staging_->GetDesc(&old);
-                if (!staging_ || old.Width != desc.Width || old.Height != desc.Height) {
-                    staging_.Reset();
+                if (gpuFrame_)
+                    gpuFrame_->GetDesc(&old);
+                if (!gpuFrame_ || old.Width != desc.Width || old.Height != desc.Height) {
+                    gpuFrame_.Reset();
                     auto stagingDesc = desc;
-                    stagingDesc.BindFlags = 0;
-                    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-                    stagingDesc.Usage = D3D11_USAGE_STAGING;
+                    stagingDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+                    stagingDesc.CPUAccessFlags = 0;
+                    stagingDesc.Usage = D3D11_USAGE_DEFAULT;
                     stagingDesc.MiscFlags = 0;
-                    check(device_->CreateTexture2D(&stagingDesc, nullptr, &staging_));
+                    check(device_->CreateTexture2D(&stagingDesc, nullptr, &gpuFrame_));
                 }
-                context_->CopyResource(staging_.Get(), texture.Get());
+                context_->CopyResource(gpuFrame_.Get(), texture.Get());
                 contentSize_ = QSize(content.Width, content.Height);
-                publishFrame();
+                ++generation_;
                 if (desc.Width != UINT(content.Width) || desc.Height != UINT(content.Height)) {
                     frame.Close();
                     sender.Recreate(rtDevice_, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2,
@@ -225,15 +249,29 @@ class WinVideo final : public VideoCapture {
         throw std::runtime_error(QString::fromWCharArray(ex.message().c_str()).toStdString());
     }
     QImage latestFrame() override {
-        std::lock_guard lock(frameMutex_);
+        std::lock_guard lock(mutex_);
+        publishFrame();
         return latest_;
+    }
+    quint64 cpuReadbacks() const override {
+        return readbacks_.load();
+    }
+    std::unique_ptr<NativeVideoEncoder> createNativeEncoder(const Settings &settings,
+                                                            const QString &file) override {
+        return createWindowsGpuEncoder(
+            device_.Get(),
+            [this](const auto &consume) {
+                std::lock_guard lock(mutex_);
+                consume({gpuFrame_, crop_, contentSize_});
+            },
+            settings, file);
     }
     void setRegion(const QRect &region) override {
         std::lock_guard lock(mutex_);
         if (crop_.isEmpty() || region.size() != canvas_ || region.x() < 0 || region.y() < 0)
             throw std::runtime_error("녹화 중에는 영역 크기를 유지해야 합니다.");
         crop_ = region;
-        publishFrame();
+        ++generation_;
     }
     void setCursor(bool enabled) override try {
         std::lock_guard lock(mutex_);
@@ -258,6 +296,8 @@ class WinVideo final : public VideoCapture {
         item_ = nullptr;
         rtDevice_ = nullptr;
         staging_.Reset();
+        gpuFrame_.Reset();
+        published_ = generation_ = 0;
         context_.Reset();
         device_.Reset();
         {

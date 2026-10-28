@@ -89,6 +89,12 @@ class RecorderController final : public QObject {
     bool hasSource() const {
         return video_ != nullptr;
     }
+    quint64 captureReadbacks() const {
+        return video_ ? video_->cpuReadbacks() : 0;
+    }
+    void setUpdateBlocked(bool value) {
+        updateBlocked_ = value;
+    }
     int previewRevision() const {
         return revision_;
     }
@@ -235,6 +241,7 @@ class RecorderController final : public QObject {
     QFutureWatcher<SourceSnapshot> sourceFuture_;
     QFutureWatcher<luma::FileSaveResult> saveFuture_;
     bool unsavedRecording_ = false;
+    bool updateBlocked_ = false;
     bool automaticDiscovery_ = false;
     bool discoveryBlocked_ = false;
     std::unique_ptr<luma::VideoCapture> video_;

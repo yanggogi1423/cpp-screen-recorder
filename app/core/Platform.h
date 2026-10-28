@@ -1,5 +1,6 @@
 #pragma once
 #include "Types.h"
+#include "NativeVideoEncoder.h"
 #include <memory>
 
 namespace luma {
@@ -9,6 +10,13 @@ class VideoCapture {
     virtual void start(const Source &source, const QRect &region, bool cursor,
                        ErrorCallback error) = 0;
     virtual QImage latestFrame() = 0;
+    virtual std::unique_ptr<NativeVideoEncoder> createNativeEncoder(const Settings &,
+                                                                    const QString &) {
+        throw std::runtime_error("이 플랫폼에서 GPU 직접 인코딩을 지원하지 않습니다.");
+    }
+    virtual quint64 cpuReadbacks() const {
+        return 0;
+    }
     virtual void setCursor(bool enabled) = 0;
     virtual void setRegion(const QRect &) {
         throw std::runtime_error("이 캡처 경로는 영역 이동을 지원하지 않습니다.");

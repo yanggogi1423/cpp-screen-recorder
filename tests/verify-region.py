@@ -29,5 +29,8 @@ for time, expected in ((0.3, "red"), (1.0, "blue"), (1.8, "red")):
     samples.append({"seconds": time, "expected": expected, "fraction": selected})
 report = {"passed": True, "width": result["width"], "height": result["height"],
           "audioTracks": 0, "samples": samples, "dragVerified": result["dragVerified"]}
+if result.get("nativeGpu"):
+    assert result["compactCpuReadbacks"] == 0, result
+report.update(nativeGpu=result.get("nativeGpu", False), compactCpuReadbacks=result.get("compactCpuReadbacks"))
 (root / "artifacts/region-verification.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 print(json.dumps(report, indent=2))
