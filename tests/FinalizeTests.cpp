@@ -21,18 +21,20 @@ class Video final : public luma::VideoCapture {
     void stop() override {}
 };
 class Audio final : public luma::AudioCapture {
-    std::jthread thread_;
+    std::thread thread_;
+    std::atomic<bool> stopped_{false};
   public:
     ~Audio() override { stop(); }
     void start(const luma::AudioSource &, luma::AudioCallback callback, luma::ErrorCallback) override {
-        thread_ = std::jthread([callback](std::stop_token token) {
-            while (!token.stop_requested()) {
+        stopped_ = false;
+        thread_ = std::thread([this, callback] {
+            while (!stopped_) {
                 callback({QByteArray(480 * 4, 0), luma::clockNs()});
                 QThread::msleep(10);
             }
         });
     }
-    void stop() override { if (thread_.joinable()) { thread_.request_stop(); thread_.join(); } }
+    void stop() override { stopped_ = true; if (thread_.joinable()) thread_.join(); }
 };
 class Platform final : public luma::Platform {
   public:
