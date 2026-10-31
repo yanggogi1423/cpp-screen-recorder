@@ -129,6 +129,12 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
         setOptimized(true);
     });
     connect(&session_, &luma::RecordingSession::finalizing, this, [this] { setState("saving"); });
+    connect(&session_, &luma::RecordingSession::finalizationProgress, this,
+            [this](QString stage, int percent) {
+                finalizationStatus_ = std::move(stage);
+                finalizationPercent_ = percent;
+                emit finalizationChanged();
+            });
     connect(&session_, &luma::RecordingSession::finished, this,
             [this](QString file, QString warning) {
                 lastFile_ = file;
@@ -402,6 +408,12 @@ RecorderController::~RecorderController() {
     // session_ is declared after video_, so its worker joins before capture is destroyed.
 }
 void RecorderController::setState(QString value) {
+    if (value == "saving" && state_ != "saving") {
+        finalizationTimer_.start();
+        finalizationStatus_ = "녹화 종료 처리 중";
+        finalizationPercent_ = -1;
+        emit finalizationChanged();
+    }
     state_ = std::move(value);
     if (state_ != "recording" && state_ != "paused")
         setOptimized(false);
@@ -728,7 +740,7 @@ QString RecorderController::licenseText(QString name) const {
     QFile file(path);
     return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
 }
-void RecorderController::configureUiFixture() {
+void RecorderController::configureUiFixture(bool finalizing) {
     sourceList_ = {
         {"fixture-display", "디스플레이 1 · 2560 × 1440", luma::SourceKind::Display,
          QRect(0, 0, 2560, 1440)},
@@ -740,6 +752,12 @@ void RecorderController::configureUiFixture() {
                   {"fixture-browser", "브라우저", "", luma::AudioKind::Application}};
     selectedAudio_ = {"mic:fixture-mic", "app:fixture-discord"};
     notifySources();
+    if (finalizing) {
+        setState("saving");
+        finalizationStatus_ = "영상·소리 결합 중";
+        finalizationPercent_ = 43;
+        emit finalizationChanged();
+    }
 }
 void RecorderController::selectAudio(QString id, bool selected) {
     if (state_ != "idle" || audioCheck_.active())

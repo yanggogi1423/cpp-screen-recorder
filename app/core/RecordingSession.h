@@ -37,6 +37,7 @@ class RecordingSession : public QObject {
     void finished(QString file, QString warning);
     void failed(QString message, QString recoveryFolder);
     void finalizing();
+    void finalizationProgress(QString stage, int percent);
 
   private:
     void run(Platform *, VideoCapture *, Settings, QList<AudioSource>);

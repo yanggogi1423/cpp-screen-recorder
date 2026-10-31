@@ -45,6 +45,9 @@ class RecorderController final : public QObject {
     Q_PROPERTY(int countdown READ countdown NOTIFY stateChanged)
     Q_PROPERTY(QString elapsed READ elapsed NOTIFY tick)
     Q_PROPERTY(QString estimatedSize READ estimatedSize NOTIFY tick)
+    Q_PROPERTY(QString finalizationStatus READ finalizationStatus NOTIFY finalizationChanged)
+    Q_PROPERTY(int finalizationPercent READ finalizationPercent NOTIFY finalizationChanged)
+    Q_PROPERTY(int finalizationSeconds READ finalizationSeconds NOTIFY tick)
     Q_PROPERTY(QVariantMap recordingFile READ recordingFile NOTIFY lastFileChanged)
     Q_PROPERTY(bool hasUnsavedRecording READ hasUnsavedRecording NOTIFY unsavedChanged)
     Q_PROPERTY(QUrl lastFile READ lastFile NOTIFY lastFileChanged)
@@ -103,6 +106,11 @@ class RecorderController final : public QObject {
     }
     QString elapsed() const;
     QString estimatedSize() const;
+    QString finalizationStatus() const { return finalizationStatus_; }
+    int finalizationPercent() const { return finalizationPercent_; }
+    int finalizationSeconds() const {
+        return state_ == "saving" && finalizationTimer_.isValid() ? int(finalizationTimer_.elapsed() / 1000) : 0;
+    }
     QVariantMap recordingFile() const;
     bool hasUnsavedRecording() const {
         return unsavedRecording_;
@@ -157,7 +165,7 @@ class RecorderController final : public QObject {
     bool discovering() const {
         return sourceFuture_.isRunning();
     }
-    void configureUiFixture();
+    void configureUiFixture(bool finalizing = false);
     Q_INVOKABLE void setOptimized(bool value);
     Q_PROPERTY(QString throughput READ throughput NOTIFY tick)
     QString throughput() const {
@@ -212,6 +220,7 @@ class RecorderController final : public QObject {
     void mixerChanged();
     void regionChanged();
     void discoveryChanged();
+    void finalizationChanged();
 
   private:
     void setState(QString state);
@@ -268,6 +277,9 @@ class RecorderController final : public QObject {
     PreviewProvider *preview_;
     QTimer previewTimer_, countdownTimer_;
     QString state_ = "idle", message_, sourceName_, lastFile_;
+    QString finalizationStatus_;
+    int finalizationPercent_ = -1;
+    QElapsedTimer finalizationTimer_;
     int revision_ = 0, countdown_ = 0;
     QProcess trimProcess_;
     QString trimTemp_, trimTarget_;

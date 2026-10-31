@@ -219,8 +219,9 @@ int main(int argc, char **argv) {
         controller.setUpdateBlocked(updater.state() == "preparing" ||
                                     updater.state() == "installing");
     });
-    if (arguments.contains("--populated"))
-        controller.configureUiFixture();
+    if (arguments.contains("--populated") ||
+        (testing && arguments.contains("--finalizing")))
+        controller.configureUiFixture(testing && arguments.contains("--finalizing"));
     if (arguments.contains("--expanded"))
         controller.setExpanded(true);
     if (arguments.contains("--custom")) {
@@ -1033,6 +1034,20 @@ int main(int argc, char **argv) {
                     app.exit(42);
                     return;
                 }
+            }
+            if (arguments.contains("--finalizing")) {
+                auto *panel = root->findChild<QQuickItem *>("finalizationPanel");
+                auto *timer = root->findChild<QQuickItem *>("recordingTimer");
+                if (!panel || !panel->isVisible() || panel->width() <= 0 ||
+                    panel->mapToScene(QPointF(panel->width(), panel->height())).y() > window->height() ||
+                    !timer || timer->isVisible() || controller.finalizationPercent() != 43) {
+                    qWarning("Finalization status is hidden, clipped, or still shows a recording timer");
+                    app.exit(47);
+                    return;
+                }
+                window->grabWindow().save("artifacts/ui-finalizing.png");
+                app.exit(0);
+                return;
             }
             const auto image = window->grabWindow();
             if (!image.isNull()) {

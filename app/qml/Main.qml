@@ -1202,6 +1202,7 @@ ApplicationWindow {
                 }
                 TransportButton {
                     objectName: "recordButton"
+                    visible: recorder.state !== "saving"
                     large: true
                     symbol: root.activeRecording ? "stop" : "record"
                     text: root.activeRecording ? "녹화 종료" : "녹화 시작"
@@ -1209,6 +1210,50 @@ ApplicationWindow {
                     onClicked: {
                         testPlayer.stop();
                         recorder.toggleRecording();
+                    }
+                }
+            }
+            ColumnLayout {
+                objectName: "finalizationPanel"
+                visible: recorder.state === "saving"
+                Layout.fillWidth: true
+                spacing: 8
+                RowLayout {
+                    Layout.fillWidth: true
+                    Caption {
+                        Layout.fillWidth: true
+                        text: "녹화 종료됨 · " + recorder.finalizationStatus
+                        elide: Text.ElideRight
+                    }
+                    Caption {
+                        text: (recorder.finalizationPercent >= 0 ? recorder.finalizationPercent + "% · " : "")
+                            + Math.floor(recorder.finalizationSeconds / 60) + ":"
+                            + String(recorder.finalizationSeconds % 60).padStart(2, "0")
+                    }
+                }
+                ProgressBar {
+                    id: finalizationBar
+                    Layout.fillWidth: true
+                    from: 0
+                    to: 100
+                    value: recorder.finalizationPercent
+                    indeterminate: recorder.finalizationPercent < 0
+                    Accessible.name: recorder.finalizationStatus
+                    background: Rectangle { implicitHeight: 4; radius: 2; color: Theme.border }
+                    contentItem: Item {
+                        implicitHeight: 4
+                        Rectangle {
+                            width: parent.width * (recorder.finalizationPercent < 0 ? 0.12 : finalizationBar.visualPosition)
+                            height: parent.height
+                            radius: 2
+                            color: Theme.muted
+                            SequentialAnimation on opacity {
+                                running: finalizationBar.visible && recorder.finalizationPercent < 0
+                                loops: Animation.Infinite
+                                NumberAnimation { to: 0.35; duration: 650 }
+                                NumberAnimation { to: 1; duration: 650 }
+                            }
+                        }
                     }
                 }
             }
@@ -1243,7 +1288,7 @@ ApplicationWindow {
                             starting: "연결 중",
                             recording: "녹화 중",
                             paused: "일시정지",
-                            saving: "저장 중",
+                            saving: "녹화 종료됨",
                             exporting: "저장 중",
                             editing: "편집 중"
                         })[recorder.state] || recorder.state

@@ -1,6 +1,7 @@
 #include "RecordingSession.h"
 #include "WaveWriter.h"
 #include "RecordingFiles.h"
+#include "FinalizeProcess.h"
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -268,10 +269,13 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
         }
         timeline_.finish();
         emit finalizing();
+        emit finalizationProgress("소리 입력 종료 중", -1);
         stopCaptures();
         const auto duration = frames_.load() * 1000000000 / s.fps;
+        emit finalizationProgress("소리 원본 마무리 중", -1);
         for (auto &writer : writers)
             writer->finish(duration);
+        emit finalizationProgress("영상 원본 마무리 중", -1);
         if (native) {
             native->finish();
             native.reset();
@@ -296,7 +300,8 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
         estimatedBytes_ = estimatedRecordingBytes(QFileInfo(rawVideo).size(), frames_, s.fps,
                                                   int(sources.size()));
         const auto output = QDir(folder).filePath(recordingName + "." + s.container);
-        QStringList args = {"-hide_banner", "-y", "-i", rawVideo};
+        QStringList args = {"-hide_banner", "-nostdin", "-nostats", "-progress", "pipe:1",
+                            "-y", "-i", rawVideo};
         for (const auto &entry : trackInfo)
             args << "-i" << entry.toObject()["file"].toString();
         args << "-map" << "0:v:0";
@@ -322,21 +327,18 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
         if (s.container == "mp4")
             args << "-movflags" << "+faststart";
         args << output;
+        emit finalizationProgress(sources.isEmpty() ? "영상 파일 정리 중" : "영상·소리 결합 중", 0);
         QProcess mux;
         mux.start(ffmpeg, args);
         if (!mux.waitForStarted(5000))
             throw std::runtime_error("오디오 트랙 결합을 시작하지 못했습니다.");
-        if (!mux.waitForFinished(300000)) {
-            mux.kill();
-            mux.waitForFinished();
-            throw std::runtime_error("트랙 결합 시간이 초과됐습니다. 원본을 보관했습니다.");
-        }
-        QFile muxLog(QDir(folder).filePath("mux.log"));
-        if (muxLog.open(QIODevice::WriteOnly))
-            muxLog.write(mux.readAllStandardError());
-        if (mux.exitCode() != 0)
-            throw std::runtime_error(
-                "트랙 결합에 실패했습니다. video.mkv와 WAV 원본은 녹화 폴더에 있습니다.");
+        finishMediaProcess(mux, output, QDir(folder).filePath("mux.log"), duration,
+                           [&](int percent) {
+                               emit finalizationProgress(
+                                   percent >= 99 ? "파일 마무리 중" :
+                                   sources.isEmpty() ? "영상 파일 정리 중" : "영상·소리 결합 중",
+                                   percent);
+                           });
         QFile manifest(QDir(folder).filePath("session.json"));
         if (manifest.open(QIODevice::WriteOnly))
             manifest.write(

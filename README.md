@@ -4,7 +4,7 @@
 
 A modern desktop recorder built with **C++20 + Qt 6 / QML**, with native capture backends for Windows and macOS.
 
-**0.5.0-beta.1 Windows 베타를 배포합니다.** [다운로드 및 변경 내용](https://github.com/yanggogi1423/cpp-screen-recorder/releases/tag/v0.5.0-beta.1). 기능을 구현했다는 것과 실제 장비에서 검증했다는 것을 구분합니다. 최종 지원 상태와 테스트 증거는 [기능 점검표](docs/FEATURE_AUDIT.md)에 기록합니다. 베타(pre-release)이며 정식 안정 버전은 아닙니다.
+**0.5.0-beta.2 Windows 베타를 배포합니다.** [다운로드 및 변경 내용](https://github.com/yanggogi1423/cpp-screen-recorder/releases/tag/v0.5.0-beta.2). 기능을 구현했다는 것과 실제 장비에서 검증했다는 것을 구분합니다. 최종 지원 상태와 테스트 증거는 [기능 점검표](docs/FEATURE_AUDIT.md)에 기록합니다. 베타(pre-release)이며 정식 안정 버전은 아닙니다.
 
 ![간소화 화면](docs/images/main.png)
 
@@ -20,6 +20,7 @@ A modern desktop recorder built with **C++20 + Qt 6 / QML**, with native capture
 - **녹화 중에도** 트랙별 음량 0–200% / 뮤트 / 실제 입력에 따른 피크 표시
 - 운영체제의 스피커·통화 마이크 음량과 분리된 녹화용 믹서
 - 녹화 종료 후 이름·위치를 정하는 저장 창, 필요할 때 편집에서 재생·구간 자르기
+- 종료 시 실제 소리 결합 진행률·경과 시간 표시. 긴 녹화는 독립 트랙과 전체 믹스를 AAC로 만드는 후처리가 필요하며, 완료 후 저장 창이 열립니다.
 - 편집 저장 시 **새 파일 저장 / 원본 덮어쓰기 / 취소**를 명시적으로 선택
 - **MP4 기본 저장**, 기본·확장 화면과 파일 메뉴에서 저장 폴더 지정
 - 검정 테마, 간소화/확장 화면 전환, 설정 유지
