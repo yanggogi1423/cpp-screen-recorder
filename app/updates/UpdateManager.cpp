@@ -150,10 +150,12 @@ void UpdateManager::showCatalog(const QByteArray &bytes) {
     if (bytes.size() > 2 * 1024 * 1024) return;
     const auto document = QJsonDocument::fromJson(bytes);
     if (!document.isArray()) return;
+    const auto previous = release_.version;
+    const bool wasAvailable = state_ == "available";
     release_ = updates::selectRelease(document.array(), appinfo::version, updates::platform(), beta());
     if (release_.valid()) {
         setState("available", "새 버전 " + release_.version + "을 사용할 수 있습니다");
-        emit available();
+        if (!wasAvailable || previous != release_.version) emit available();
     } else setState("current", "이 업데이트 채널의 최신 버전입니다");
 }
 void UpdateManager::download() {

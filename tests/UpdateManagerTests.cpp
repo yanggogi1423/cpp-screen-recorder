@@ -33,6 +33,8 @@ int main(int argc, char **argv) {
     if (notices != 2) return 3;
     manager.setAllowed(true);
     if (notices != 2) return 4;
+    manager.check(false);
+    if (notices != 2) return 6; // Focusing the app must not repeatedly reopen the same notice.
     // A second startup reuses the same cache and still exposes the pending update.
     UpdateManager restarted(false);
     restarted.check(false);
