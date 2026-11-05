@@ -602,6 +602,10 @@ void apply(const fs::path &archive, const fs::path &target, const std::string &d
         throw;
     }
     // Keep the complete previous version for manual recovery. Never delete recordings.
+    // A successful extraction no longer needs its private copy of the download.
+    std::error_code ignored;
+    fs::remove(stage / "payload.zip", ignored);
+    fs::remove(stage, ignored); // Empty directory only; never remove a backup recursively.
 }
 } // namespace
 #ifdef _WIN32

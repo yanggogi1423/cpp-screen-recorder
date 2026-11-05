@@ -94,6 +94,7 @@ for case in ("success", "checksum", "traversal", "rollback", "user-collision", "
     if case == "success":
         backups = list(work.glob("installed application.backup-*"))
         assert len(backups) == 1 and "0.4.0" in (backups[0] / "farecorder-package.txt").read_text()
+        assert not list(work.glob(".FARecorder-update-*/payload.zip")), "Successful update leaked its staging archive"
     if case == "user-collision":
         assert (installed / "new-file.txt").read_text() == "user-owned"
     results.append(case)
@@ -132,6 +133,7 @@ if windows:
     assert user.read_bytes() == b"user recording must survive" and uninstaller.exists()
     run([updater, "--setup", downloaded, target, checksum, "0.5.1-beta.1", "--quiet"])
     assert (target / exe).exists() and user.read_bytes() == b"user recording must survive"
+    assert not list(work.glob(".FARecorder-update-*/payload.zip")), "Successful setup leaked its staging archive"
     results += ["setup-first-install", "setup-repair", "setup-foreign-folder-refused",
                 "uninstall-traversal-refused-before-removal", "uninstall-user-files-preserved", "reinstall-with-user-data"]
 
