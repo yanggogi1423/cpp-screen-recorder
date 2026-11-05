@@ -44,6 +44,15 @@ int main(int argc, char **argv) {
     app.setApplicationName(appinfo::name);
     app.setApplicationDisplayName(appinfo::name);
     app.setApplicationVersion(appinfo::version);
+#ifdef Q_OS_WIN
+    // Refresh Apps & Features metadata after an in-app transactional update.
+    QSettings registration("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\FARecorder",
+                           QSettings::NativeFormat);
+    const auto installedRoot = QDir::cleanPath(QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(".."));
+    if (registration.contains("InstallLocation") &&
+        QDir::cleanPath(QDir::fromNativeSeparators(registration.value("InstallLocation").toString())).compare(installedRoot, Qt::CaseInsensitive) == 0)
+        registration.setValue("DisplayVersion", appinfo::version);
+#endif
     app.setWindowIcon(QIcon("qrc:/assets/app-icon.png"));
     QQuickWindow::setDefaultAlphaBuffer(true);
     // Embedded faces keep the UI consistent without installing a system font.

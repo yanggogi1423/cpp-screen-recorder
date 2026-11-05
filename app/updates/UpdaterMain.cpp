@@ -17,6 +17,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <bcrypt.h>
+#include <tlhelp32.h>
 #else
 #include <CommonCrypto/CommonDigest.h>
 #include <libproc.h>
@@ -403,6 +404,7 @@ void writeManifest(const fs::path &root) {
     }
     ensure(bool(output), "Cannot finish package manifest");
 }
+void rejectLinkedPath(fs::path path);
 void preserveUserFiles(const fs::path &oldRoot, const fs::path &newRoot) {
     std::ifstream file(oldRoot / "update-files.txt");
     ensure(bool(file), "Installed package has no update manifest; use manual update");
@@ -417,6 +419,9 @@ void preserveUserFiles(const fs::path &oldRoot, const fs::path &newRoot) {
     ensure(known.count("farecorder-package.txt") && known.count("update-files.txt"),
            "Invalid installed manifest");
     for (const auto &entry : fs::recursive_directory_iterator(oldRoot)) {
+#ifdef _WIN32
+        rejectLinkedPath(entry.path());
+#endif
         if (entry.is_directory() && !entry.is_symlink())
             continue;
         const auto relative = entry.path().lexically_relative(oldRoot);
@@ -432,9 +437,102 @@ void preserveUserFiles(const fs::path &oldRoot, const fs::path &newRoot) {
             fs::copy_file(entry.path(), target);
     }
 }
-void apply(const fs::path &archive, const fs::path &target, const std::string &digest,
-           const std::string &version, unsigned long parent) {
+void rejectLinkedPath(fs::path path) {
+    for (; !path.empty(); path = path.parent_path()) {
+        ensure(!fs::is_symlink(path), "Linked installation path refused");
+#ifdef _WIN32
+        const auto attributes = GetFileAttributesW(path.c_str());
+        ensure(attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_REPARSE_POINT),
+               "Reparse installation path refused");
+#endif
+        if (path == path.root_path()) break;
+    }
+}
+void ensureAppClosed(const fs::path &root) {
+#ifdef _WIN32
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    ensure(snapshot != INVALID_HANDLE_VALUE, "Cannot inspect running application");
+    PROCESSENTRY32W entry{sizeof(entry)};
+    bool running = false;
+    if (Process32FirstW(snapshot, &entry)) do {
+        if (_wcsicmp(entry.szExeFile, L"FARecorder.exe") != 0) continue;
+        HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
+        wchar_t name[32768]; DWORD size = 32768;
+        if (!process || !QueryFullProcessImageNameW(process, 0, name, &size)) {
+            if (process) CloseHandle(process);
+            CloseHandle(snapshot);
+            throw std::runtime_error("Cannot inspect FARecorder; close it before installing");
+        }
+        CloseHandle(process);
+        std::error_code error;
+        running |= fs::equivalent(fs::path(std::wstring(name, size)), appExecutable(root), error);
+    } while (Process32NextW(snapshot, &entry));
+    CloseHandle(snapshot);
+    ensure(!running, "Close FARecorder before installing or uninstalling; no files changed");
+#else
+    (void)root;
+#endif
+}
+void uninstall(const fs::path &target) {
+    rejectLinkedPath(fs::absolute(target));
     const auto root = fs::canonical(target);
+    ensure(line(root / "farecorder-package.txt") == "FARecorder", "Not an FARecorder installation");
+    ensureAppClosed(root);
+    std::ifstream manifest(root / "update-files.txt");
+    ensure(bool(manifest), "Installation manifest missing; no files removed");
+    std::vector<fs::path> files;
+    std::set<fs::path> directories;
+    std::string value;
+    while (std::getline(manifest, value)) {
+        if (!value.empty() && value.back() == '\r') value.pop_back();
+        ensure(safeRelative(value), "Unsafe uninstall manifest; no files removed");
+        const auto file = root / pathFrom(value);
+        rejectLinkedPath(file);
+        ensure(!fs::is_directory(file), "Directory in uninstall manifest; no files removed");
+        files.push_back(file);
+        for (auto dir = file.parent_path(); dir != root; dir = dir.parent_path())
+            directories.insert(dir);
+    }
+    ensure(std::find(files.begin(), files.end(), root / "farecorder-package.txt") != files.end() &&
+           std::find(files.begin(), files.end(), root / "update-files.txt") != files.end(),
+           "Incomplete uninstall manifest; no files removed");
+    manifest.close();
+    for (const auto &file : files)
+        if (file != root / "farecorder-package.txt" && file != root / "update-files.txt")
+            fs::remove(file);
+    for (auto it = directories.rbegin(); it != directories.rend(); ++it) {
+        std::error_code ignored;
+        fs::remove(*it, ignored); // Only empty directories; preserve every unknown file.
+    }
+    bool userFiles = false;
+    for (const auto &entry : fs::directory_iterator(root)) {
+        const auto name = entry.path().filename();
+        if (name != "Uninstall.exe" && name != "farecorder-package.txt" && name != "update-files.txt")
+            userFiles = true;
+    }
+    if (userFiles) {
+        // Retain ownership of the data-containing folder so reinstall preserves it.
+        std::ofstream remaining(root / "update-files.txt", std::ios::trunc);
+        remaining << "farecorder-package.txt\nupdate-files.txt\n";
+        ensure(bool(remaining), "Cannot preserve reinstall ownership metadata");
+    } else {
+        fs::remove(root / "update-files.txt");
+        fs::remove(root / "farecorder-package.txt");
+    }
+}
+void apply(const fs::path &archive, const fs::path &target, const std::string &digest,
+           const std::string &version, unsigned long parent, bool setup = false) {
+    rejectLinkedPath(fs::absolute(target));
+    const auto root = setup ? fs::weakly_canonical(target) : fs::canonical(target);
+    const bool existed = fs::exists(root);
+    const bool recognized = line(root / "farecorder-package.txt") == "FARecorder" &&
+                            fs::is_regular_file(root / "update-files.txt");
+    const bool owned = recognized && fs::is_regular_file(appExecutable(root));
+    if (setup) {
+        ensure(!existed || fs::is_empty(root) || recognized, "Install only in an empty or FARecorder folder");
+        ensureAppClosed(root);
+        fs::create_directories(root.parent_path());
+    }
     const auto module = fs::canonical(modulePath());
     ensure(root.has_filename() && root != root.root_path() && !inside(module, root),
            "Updater must run outside the application folder");
@@ -442,8 +540,7 @@ void apply(const fs::path &archive, const fs::path &target, const std::string &d
            "Archive is not in this update's work folder");
     ensure(digest.size() == 64 && hashFile(archive) == digest,
            "Update checksum mismatch; no files changed");
-    ensure(line(root / "farecorder-package.txt") == "FARecorder" &&
-               fs::is_regular_file(appExecutable(root)),
+    ensure(setup || owned,
            "Not an installed FARecorder package");
     validateArchive(archive);
     const auto token = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
@@ -481,24 +578,27 @@ void apply(const fs::path &archive, const fs::path &target, const std::string &d
     auto canceled = module;
     canceled += ".cancel";
     ensure(!fs::exists(canceled), "Update canceled");
-    waitForParent(parent, appExecutable(root));
+    if (setup) ensureAppClosed(root);
+    else waitForParent(parent, appExecutable(root));
     ensure(!fs::exists(canceled), "Update canceled");
     auto backup = root;
     backup += pathFrom(".backup-" + token);
     bool replaced = false, moved = false;
     try {
-        preserveUserFiles(root, fresh);
-        fs::rename(root, backup);
-        moved = true;
+        if (recognized) preserveUserFiles(root, fresh);
+        if (existed) {
+            fs::rename(root, backup);
+            moved = true;
+        }
         fs::rename(fresh, root);
         replaced = true;
-        ensure(launch(appExecutable(root), true), "Updated app could not start");
+        if (!setup) ensure(launch(appExecutable(root), true), "Updated app could not start");
     } catch (...) {
         if (replaced)
             fs::rename(root, stage / "failed-package");
         if (moved)
             fs::rename(backup, root);
-        launch(appExecutable(root), false);
+        if (!setup && moved) launch(appExecutable(root), false);
         throw;
     }
     // Keep the complete previous version for manual recovery. Never delete recordings.
@@ -526,6 +626,16 @@ int main(int argc, char **argv) {
             writeManifest(fs::canonical(args[2]));
             return 0;
         }
+#ifdef _WIN32
+        if (argc == 3 && args[1] == "--uninstall") {
+            uninstall(args[2]);
+            return 0;
+        }
+        if (argc == 6 && args[1] == "--setup") {
+            apply(args[2], args[3], utf8(args[4]), utf8(args[5]), 0, true);
+            return 0;
+        }
+#endif
         ensure(argc == 7 && args[1] == "--apply", "Invalid updater arguments");
         apply(args[2], args[3], utf8(args[4]), utf8(args[5]), std::stoul(utf8(args[6])));
         return 0;

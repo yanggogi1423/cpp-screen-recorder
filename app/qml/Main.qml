@@ -9,6 +9,7 @@ ApplicationWindow {
     id: root
     property bool expanded: recorder.expanded
     property bool optimized: recorder.optimized
+    property bool pendingUpdateNotice: false
     property rect normalBounds: Qt.rect(0, 0, 780, 780)
     property bool restoreMaximized: false
     property bool changingGeometry: false
@@ -552,8 +553,15 @@ ApplicationWindow {
             root.close();
         }
         function onAvailable() {
-            if (root.idle && !recorder.hasUnsavedRecording && !editor.opened)
-                updateDialog.open();
+            root.pendingUpdateNotice = true;
+        }
+    }
+    Timer {
+        interval: 300
+        running: root.pendingUpdateNotice && root.idle && !recorder.hasUnsavedRecording && !editor.opened && updater.allowed
+        onTriggered: {
+            root.pendingUpdateNotice = false;
+            updateDialog.open();
         }
     }
     QuietDialog {
@@ -561,10 +569,10 @@ ApplicationWindow {
         objectName: "updateDialog"
         anchors.centerIn: parent
         width: Math.min(580, root.width - 48)
-        title: "FARecorder 업데이트"
+        title: busy && updater.state !== "checking" ? "업데이트 중" : "FARecorder 업데이트"
         height: Math.min(updater.notes.length > 0 ? 550 : 360, root.height - 48)
         property bool busy: updater.state === "checking" || updater.state === "downloading" || updater.state === "preparing" || updater.state === "installing"
-        closePolicy: updater.state === "preparing" || updater.state === "installing" ? Popup.NoAutoClose : Popup.CloseOnEscape
+        closePolicy: busy ? Popup.NoAutoClose : Popup.CloseOnEscape
         contentItem: ColumnLayout {
             spacing: 16
             Caption {
@@ -578,9 +586,10 @@ ApplicationWindow {
                 font.pixelSize: 13
             }
             ProgressBar {
-                visible: updater.state === "downloading"
+                visible: updater.state === "downloading" || updater.state === "preparing" || updater.state === "installing"
                 Layout.fillWidth: true
                 value: updater.progress
+                indeterminate: updater.state !== "downloading"
             }
             ScrollView {
                 visible: updater.notes.length > 0
@@ -616,7 +625,7 @@ ApplicationWindow {
             RowLayout {
                 ActionButton {
                     text: "닫기"
-                    enabled: updater.state !== "preparing" && updater.state !== "installing"
+                    enabled: !updateDialog.busy
                     onClicked: updateDialog.close()
                 }
                 ActionButton {
@@ -633,10 +642,10 @@ ApplicationWindow {
                 }
                 ActionButton {
                     visible: updater.state !== "downloading" && updater.state !== "ready"
-                    text: updater.state === "available" ? "다운로드" : "업데이트 확인"
+                    text: updater.state === "available" ? "업데이트 시작" : "업데이트 확인"
                     primary: true
                     enabled: !updateDialog.busy && (updater.state !== "available" || updater.allowed)
-                    onClicked: updater.state === "available" ? updater.download() : updater.check()
+                    onClicked: updater.state === "available" ? updater.startUpdate() : updater.check()
                 }
                 ActionButton {
                     objectName: "installUpdate"

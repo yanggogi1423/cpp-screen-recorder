@@ -98,4 +98,41 @@ for case in ("success", "checksum", "traversal", "rollback", "user-collision", "
         assert (installed / "new-file.txt").read_text() == "user-owned"
     results.append(case)
 
+if windows:
+    work = root / "setup-preservation"
+    work.mkdir()
+    new = work / package
+    make_app(new, "0.5.1-beta.1", good)
+    downloaded = archive(new)
+    updater = work / helper.name
+    shutil.copy2(helper, updater)
+    checksum = hashlib.sha256(downloaded.read_bytes()).hexdigest()
+    target = work / "fresh install"
+    run([updater, "--setup", downloaded, target, checksum, "0.5.1-beta.1", "--quiet"])
+    assert (target / exe).is_file()
+    user = target / "My recordings" / "important.mp4"
+    user.parent.mkdir(); user.write_bytes(b"user recording must survive")
+    uninstaller = target / "Uninstall.exe"
+    uninstaller.write_bytes(b"preserve installer registration helper")
+    run([updater, "--setup", downloaded, target, checksum, "0.5.1-beta.1", "--quiet"])
+    assert user.read_bytes() == b"user recording must survive"
+    assert uninstaller.read_bytes() == b"preserve installer registration helper"
+    blocked = work / "unrelated directory"
+    blocked.mkdir(); (blocked / "private.txt").write_bytes(b"do not change")
+    run([updater, "--setup", downloaded, blocked, checksum, "0.5.1-beta.1", "--quiet"], expected=1)
+    assert list(blocked.iterdir()) == [blocked / "private.txt"]
+    manifest = target / "update-files.txt"
+    original = manifest.read_bytes()
+    manifest.write_bytes(original + b"../outside.txt\n")
+    run([updater, "--uninstall", target, "--quiet"], expected=1)
+    assert (target / exe).is_file() and user.read_bytes() == b"user recording must survive"
+    manifest.write_bytes(original)
+    run([updater, "--uninstall", target, "--quiet"])
+    assert not (target / exe).exists() and manifest.read_text() == "farecorder-package.txt\nupdate-files.txt\n"
+    assert user.read_bytes() == b"user recording must survive" and uninstaller.exists()
+    run([updater, "--setup", downloaded, target, checksum, "0.5.1-beta.1", "--quiet"])
+    assert (target / exe).exists() and user.read_bytes() == b"user recording must survive"
+    results += ["setup-first-install", "setup-repair", "setup-foreign-folder-refused",
+                "uninstall-traversal-refused-before-removal", "uninstall-user-files-preserved", "reinstall-with-user-data"]
+
 print(json.dumps({"passed": results, "fixtures": str(root)}, ensure_ascii=False))

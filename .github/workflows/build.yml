@@ -33,6 +33,14 @@ jobs:
           cmake --build build --parallel 3
           ctest --test-dir build --output-on-failure
           cmake --install build --prefix dist/FARecorder-macOS
+      - name: Windows installer and preservation tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./tools/package-windows.ps1 -BundleRoot dist/FARecorder-Windows-x64 -OutputDirectory artifacts/installer-ci -TestPackage
+          $version=([regex]::Match((Get-Content app/AppInfo.h -Raw),'version = "([^"]+)"')).Groups[1].Value
+          ./tools/test-windows-installer.ps1 -Installer "artifacts/installer-ci/FARecorder-$version-windows-x64-Setup-test.exe"
+          ./tools/package-windows.ps1 -BundleRoot dist/FARecorder-Windows-x64 -OutputDirectory dist/releases
       - name: Upload test diagnostics
         if: always()
         uses: actions/upload-artifact@v4

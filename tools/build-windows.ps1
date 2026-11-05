@@ -1,8 +1,9 @@
-param([switch]$Deploy, [switch]$Clean)
+param([switch]$Deploy, [switch]$Clean, [string]$DeployPrefix)
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 $qt=Join-Path $root '.deps/Qt/6.8.3/msvc2022_64'
 if($env:QT_ROOT_DIR){$qt=$env:QT_ROOT_DIR}
+$qt=[IO.Path]::GetFullPath($qt)
 $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
 $vs=& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if(-not $vs){throw 'Visual Studio C++ tools not found.'}
@@ -28,12 +29,13 @@ $env:PATH="$qt/bin;$env:PATH"
 & (Join-Path (Split-Path $cmake) 'ctest.exe') --test-dir (Join-Path $root 'build') --output-on-failure
 if($LASTEXITCODE -ne 0){throw 'Tests failed.'}
 if($Deploy){
-    & $cmake --install (Join-Path $root 'build') --prefix (Join-Path $root 'dist/FARecorder-Windows-x64')
+    $bundle=if($DeployPrefix){[IO.Path]::GetFullPath($DeployPrefix)}else{Join-Path $root 'dist/FARecorder-Windows-x64'}
+    & $cmake --install (Join-Path $root 'build') --prefix $bundle
     if($LASTEXITCODE -ne 0){throw 'Deployment failed.'}
-    $bundle=Join-Path $root 'dist/FARecorder-Windows-x64'
     if(Test-Path -LiteralPath (Join-Path $root 'tools/ffmpeg/bin/ffmpeg.exe')){
         Copy-Item -LiteralPath (Join-Path $root 'tools/ffmpeg/bin/ffmpeg.exe') -Destination (Join-Path $bundle 'bin/ffmpeg.exe') -Force
         Copy-Item -LiteralPath (Join-Path $root 'tools/ffmpeg/LICENSE.txt') -Destination (Join-Path $bundle 'FFmpeg-LICENSE.txt') -Force
+        Copy-Item -LiteralPath (Join-Path $root 'tools/ffmpeg/README.txt') -Destination (Join-Path $bundle 'FFmpeg-README.txt') -Force
     }
     Copy-Item -LiteralPath (Join-Path $root 'THIRD_PARTY_NOTICES.md') -Destination $bundle -Force
     & (Join-Path $bundle 'bin/FARecorderUpdater.exe') --write-manifest $bundle

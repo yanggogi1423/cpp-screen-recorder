@@ -11,6 +11,7 @@
 #include <QDesktopServices>
 #include <QUuid>
 #include <QTimer>
+#include <QGuiApplication>
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
@@ -35,11 +36,19 @@ UpdateManager::UpdateManager(bool startup, QObject *parent) : QObject(parent) {
             emit readyToRestart();
         }
     });
-    if (startup)
-        QTimer::singleShot(15000, this, [this] {
+    if (startup) {
+        QTimer::singleShot(3000, this, [this] {
             if (automatic())
                 check(false);
         });
+        periodicCheck_.setInterval(15 * 60 * 1000);
+        connect(&periodicCheck_, &QTimer::timeout, this, [this] { if (automatic()) check(false); });
+        periodicCheck_.start();
+        if (auto *app = qobject_cast<QGuiApplication *>(QCoreApplication::instance()))
+            connect(app, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
+                if (state == Qt::ApplicationActive && automatic()) check(false);
+            });
+    }
 }
 UpdateManager::~UpdateManager() {
     if (reply_) {
@@ -82,7 +91,7 @@ QNetworkRequest UpdateManager::request(const QUrl &url) const {
     return request;
 }
 void UpdateManager::check(bool manual) {
-    if (reply_ || state_ == "ready")
+    if (reply_ || state_ == "ready" || state_ == "preparing" || state_ == "installing")
         return;
     QSettings settings;
     const auto last = settings.value("updates/lastCheck").toLongLong();
@@ -91,8 +100,11 @@ void UpdateManager::check(bool manual) {
             setState("error", "GitHub 조회 한도가 복구된 뒤 다시 확인해 주세요.");
         return;
     }
-    if (!manual && QDateTime::currentSecsSinceEpoch() - last < 86400)
+    if (!manual && QDateTime::currentSecsSinceEpoch() - last < 900) {
+        const auto cached = settings.value("updates/catalog").toByteArray();
+        if (!cached.isEmpty()) showCatalog(cached);
         return;
+    }
     setState("checking", "새 버전을 확인하는 중…");
     auto req = request(
         QUrl("https://api.github.com/repos/yanggogi1423/cpp-screen-recorder/releases?per_page=50"));
@@ -131,14 +143,18 @@ void UpdateManager::check(bool manual) {
         settings.setValue("updates/catalog", bytes);
         if (status != 304)
             settings.setValue("updates/etag", reply->rawHeader("ETag"));
-        release_ =
-            updates::selectRelease(document.array(), appinfo::version, updates::platform(), beta());
-        if (release_.valid()) {
-            setState("available", "새 버전 " + release_.version + "을 사용할 수 있습니다");
-            emit available();
-        } else
-            setState("current", "이 업데이트 채널의 최신 버전입니다");
+        showCatalog(bytes);
     });
+}
+void UpdateManager::showCatalog(const QByteArray &bytes) {
+    if (bytes.size() > 2 * 1024 * 1024) return;
+    const auto document = QJsonDocument::fromJson(bytes);
+    if (!document.isArray()) return;
+    release_ = updates::selectRelease(document.array(), appinfo::version, updates::platform(), beta());
+    if (release_.valid()) {
+        setState("available", "새 버전 " + release_.version + "을 사용할 수 있습니다");
+        emit available();
+    } else setState("current", "이 업데이트 채널의 최신 버전입니다");
 }
 void UpdateManager::download() {
     if (reply_ || !release_.valid() || !allowed_)
@@ -198,6 +214,10 @@ void UpdateManager::download() {
         }
         output_.reset();
         setState("ready", "다운로드와 SHA256 검증을 마쳤습니다");
+        if (installAfterDownload_ && allowed_) {
+            installAfterDownload_ = false;
+            install();
+        }
     });
 }
 bool UpdateManager::install() {
@@ -206,7 +226,7 @@ bool UpdateManager::install() {
     QDir root(QCoreApplication::applicationDirPath());
 #ifdef Q_OS_WIN
     if (root.dirName() != "bin") {
-        setState("error", "배포 ZIP을 모두 압축 해제한 위치에서 실행해 주세요.");
+        setState("error", "설치된 앱 또는 배포 폴더에서 실행해 주세요.");
         return false;
     }
     root.cdUp();
@@ -220,7 +240,7 @@ bool UpdateManager::install() {
     if (!marker.open(QIODevice::ReadOnly) || marker.readLine().trimmed() != "FARecorder") {
         setState(
             "error",
-            "자동 설치를 지원하는 배포 폴더가 아닙니다. 릴리즈 페이지에서 새 ZIP을 받아 주세요.");
+            "자동 업데이트를 지원하는 위치가 아닙니다. 릴리즈 페이지에서 설치 파일을 받아 주세요.");
         return false;
     }
     const auto source = QDir(QCoreApplication::applicationDirPath()).filePath(executable);
@@ -257,6 +277,7 @@ bool UpdateManager::install() {
     return true;
 }
 void UpdateManager::cancel() {
+    installAfterDownload_ = false;
     if (state_ == "preparing") {
         QFile canceled(helper_ + ".cancel");
         canceled.open(QIODevice::WriteOnly);

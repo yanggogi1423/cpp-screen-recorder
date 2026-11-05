@@ -4,7 +4,7 @@
 
 A modern desktop recorder built with **C++20 + Qt 6 / QML**, with native capture backends for Windows and macOS.
 
-**0.5.0-beta.2 Windows 베타를 배포합니다.** [다운로드 및 변경 내용](https://github.com/yanggogi1423/cpp-screen-recorder/releases/tag/v0.5.0-beta.2). 기능을 구현했다는 것과 실제 장비에서 검증했다는 것을 구분합니다. 최종 지원 상태와 테스트 증거는 [기능 점검표](docs/FEATURE_AUDIT.md)에 기록합니다. 베타(pre-release)이며 정식 안정 버전은 아닙니다.
+**0.5.1-beta.1 Windows 설치판을 배포합니다.** [다운로드 및 변경 내용](https://github.com/yanggogi1423/cpp-screen-recorder/releases/tag/v0.5.1-beta.1). 기능을 구현했다는 것과 실제 장비에서 검증했다는 것을 구분합니다. 최종 지원 상태와 테스트 증거는 [기능 점검표](docs/FEATURE_AUDIT.md)에 기록합니다. 베타(pre-release)이며 정식 안정 버전은 아닙니다.
 
 ![간소화 화면](docs/images/main.png)
 
@@ -40,6 +40,12 @@ A modern desktop recorder built with **C++20 + Qt 6 / QML**, with native capture
 
 현재 macOS 마이크 경로는 시스템 기본 입력 장치 1개를 사용합니다. Windows는 입력 장치별로 선택할 수 있으며, macOS의 개별 입력 장치 선택은 보강 대상입니다.
 
+## 설치
+
+[Windows 설치 EXE 다운로드](https://github.com/yanggogi1423/cpp-screen-recorder/releases/download/v0.5.1-beta.1/FARecorder-0.5.1-beta.1-windows-x64-Setup.exe)를 실행하세요. 기본 위치는 `%LOCALAPPDATA%/Programs/FARecorder`이며, 관리자 권한 없이 현재 계정에 설치합니다. 시작 메뉴에서 FARecorder를 실행하고 Windows 설정의 설치된 앱에서 제거합니다. 기존 ZIP 사용자는 설치 EXE를 한 번 실행하면 기존 설정·녹화·복구 데이터를 이어서 사용합니다.
+
+업데이트는 시작 약 3초 후와 실행 중 15분마다 확인합니다. **업데이트 시작**을 누르면 다운로드·SHA256 검증·적용 후 자동으로 다시 실행합니다. 녹화·편집·미저장 상태에서는 설치하지 않으며 새 버전 알림을 뒤로 미룹니다. 릴리즈의 ZIP은 기존 버전 호환 및 내부 업데이트용입니다.
+
 ## 사용 순서
 
 1. 화면·창·오디오 소스는 시작 시와 변경 시 자동으로 갱신됩니다. macOS는 화면·오디오 녹화 권한이 필요합니다.
@@ -67,9 +73,9 @@ Windows는 **Ctrl+R**로 시작/종료, **Ctrl+P**로 일시정지/재개합니�
 
 상세 패널 → 인코더 → **GPU 직접**을 선택합니다. 사용 중인 GPU/드라이버에서 실제 합성 프레임 검사 후 녹화합니다. 기존 CPU·FFmpeg 옵션도 유지하며 실패 시 자동으로 다른 인코더로 바꾸지는 않습니다.
 
-**도움말 → 업데이트**에서 자동 확인과 베타 포함 여부를 고릅니다. 현재 공개 GitHub Releases를 사용하므로 별도 서버가 필요하지 않습니다. 하루 단위 캐시·ETag·호출 한도 처리를 사용하며, 다운로드·SHA256 검증과 준비가 성공한 뒤에만 앱을 종료하고 교체합니다. 미저장 영상이 있으면 먼저 저장해야 합니다. 기존 버전은 백업합니다. [업데이트 정책](docs/UPDATES.md)
+**도움말 → 업데이트**에서 자동 확인과 베타 포함 여부를 고릅니다. 현재 공개 GitHub Releases를 사용하므로 별도 서버가 필요하지 않습니다. 15분 간격 확인·ETag·호출 한도 처리를 사용하며, 다운로드·SHA256 검증과 준비가 성공한 뒤에만 앱을 종료하고 교체합니다. 미저장 영상이 있으면 먼저 저장해야 합니다. 기존 버전은 백업합니다. [업데이트 정책](docs/UPDATES.md)
 
-0.4 버전에는 이 기능이 없으므로 **0.5 베타는 한 번 수동으로 설치**해야 합니다. macOS 코드는 CI 대상이며 실제 Mac의 GPU·권한·앱 교체 검증 전까지 실행 파일을 공개하지 않습니다.
+0.4 버전과 기존 ZIP 사용자는 **설치 EXE를 한 번 실행**해 설치판으로 전환할 수 있습니다. macOS 코드는 CI 대상이며 실제 Mac의 GPU·권한·앱 교체 검증 전까지 실행 파일을 공개하지 않습니다.
 
 ## 개발 환경
 
@@ -141,7 +147,7 @@ macOS 빌드/기본 테스트/배포는 CI에서 통과했습니다. 물리 Mac�
 
 ## 제품 정보
 
-프로그램 이름은 **FARecorder**, 제작자 표기는 GitHub 저장소 소유자 **yanggogi1423**입니다. 도움말에 현재 버전과 마지막 코드 업데이트 날짜(2026-10-31), [저장소](https://github.com/yanggogi1423/cpp-screen-recorder) 링크를 표시합니다. 업데이트 날짜는 마지막 확인 시각이나 자동 업데이트 확인 결과가 아닙니다.
+프로그램 이름은 **FARecorder**, 제작자 표기는 GitHub 저장소 소유자 **yanggogi1423**입니다. 도움말에 현재 버전과 마지막 코드 업데이트 날짜(2026-11-05), [저장소](https://github.com/yanggogi1423/cpp-screen-recorder) 링크를 표시합니다. 업데이트 날짜는 마지막 확인 시각이나 자동 업데이트 확인 결과가 아닙니다.
 
 이전 Luma 설정은 처음 실행할 때 저장 폴더·해상도·FPS·화면 모드를 가져옵니다. 새 이름에서는 MP4를 기본으로 시작하며, 이후 확장 화면에서 직접 선택한 형식은 유지합니다. 내부 C++ namespace / QML URI `Luma`는 호환성을 위해 유지합니다.
 

@@ -10,4 +10,6 @@ D2Coding 1.4.0 standard Regular and Bold fonts are embedded without modification
 
 Microsoft C++/WinRT tooling (project-local development dependency) is under the MIT license: https://github.com/microsoft/cppwinrt . Windows system libraries and macOS frameworks are supplied by their operating systems.
 
+The Windows installer is built using the unmodified official NSIS 3.13 distribution. NSIS and its included components retain their original licenses (including the zlib/libpng license for the installer stub). Preserve `licenses/NSIS/COPYING.txt`. Official source: https://sourceforge.net/projects/nsis/files/NSIS%203/3.13/ .
+
 The MIT License for FARecorder does not relicense Qt, D2Coding or FFmpeg. Preserve the separate component notices and corresponding license/source information when redistributing a package. Development builds are unsigned previews.

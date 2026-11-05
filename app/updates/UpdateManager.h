@@ -29,11 +29,14 @@ class UpdateManager final : public QObject {
     qint64 received_ = 0;
     bool allowed_ = true;
     bool automatic_ = true, beta_ = false;
+    bool installAfterDownload_ = false;
+    QTimer periodicCheck_;
     QElapsedTimer progressTimer_;
     QTimer installPoll_;
     QElapsedTimer installTimer_;
     QString helper_;
     void setState(QString state, QString message);
+    void showCatalog(const QByteArray &);
     QNetworkRequest request(const QUrl &) const;
 
   public:
@@ -62,11 +65,18 @@ class UpdateManager final : public QObject {
     void setAutomatic(bool);
     void setBeta(bool);
     void setAllowed(bool value) {
+        if (allowed_ == value) return;
         allowed_ = value;
         emit changed();
+        if (value && state_ == "available") emit available();
     }
     Q_INVOKABLE void check(bool manual = true);
     Q_INVOKABLE void download();
+    Q_INVOKABLE void startUpdate() {
+        if (!allowed_) return;
+        installAfterDownload_ = true;
+        download();
+    }
     Q_INVOKABLE bool install();
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void openReleasePage();
