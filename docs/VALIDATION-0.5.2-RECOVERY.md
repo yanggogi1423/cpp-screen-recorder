@@ -20,3 +20,5 @@
 사용자 요청으로 실행 중인 앱과 링크가 없음을 확인한 실제 Recovery 9.954GiB/79파일을 삭제했다. 별도의 최종 영상 폴더는 유지했고 전후 파일 크기·수정 시각이 같음을 확인했다. 경로·파일별 개인정보를 포함할 수 있는 원본 로그는 공개 소스에 포함하지 않는다.
 
 로컬 개발 SDK는 저장 공간 정리 요청으로 제거했다. 새 버전은 GitHub CI에서 빌드하고 배포 파일만 내려받아 설치·실제 저장을 확인한다. 물리 Mac 녹화 검증은 macOS CI와 구분한다.
+
+최초 macOS 작업은 runner와 step이 배정되기 전 취소됐다. GitHub의 [macOS14 실행기 지원 종료](https://github.blog/changelog/2026-10-01-github-actions-macos-14-runner-image-retirement/)와 현재 실행기 목록을 확인하고 CI를 macOS15로 옮겼다. 테스트나 최소 앱 지원 버전을 낮추거나 생략하지 않는다.
