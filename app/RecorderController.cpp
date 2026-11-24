@@ -1,6 +1,7 @@
 #include "RecorderController.h"
 #include "AppInfo.h"
 #include "core/RegionGeometry.h"
+#include "core/RecoveryFiles.h"
 #include <QWindow>
 #include <QtGui/qscreen_platform.h>
 #ifdef Q_OS_WIN
@@ -124,7 +125,11 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
         } else
             emit stateChanged();
     });
-    connect(&session_, &luma::RecordingSession::started, this, [this](QString) {
+    connect(&session_, &luma::RecordingSession::started, this, [this](QString folder) {
+        recordingRecoveryFolder_ = folder;
+        recordingRecoveryRoot_ = settings_.recoveryFolder.isEmpty()
+            ? QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("Recovery")
+            : settings_.recoveryFolder;
         setState("recording");
         setOptimized(true);
     });
@@ -158,6 +163,13 @@ RecorderController::RecorderController(PreviewProvider *preview, QObject *parent
         else {
             lastFile_ = result.file;
             unsavedRecording_ = false;
+            if (!result.cleanupWarning.isEmpty())
+                showMessage("영상은 저장했습니다. " + result.cleanupWarning);
+            else {
+                recordingRecoveryFolder_.clear();
+                recordingRecoveryRoot_.clear();
+                clearMessage();
+            }
             emit unsavedChanged();
             emit lastFileChanged();
             emit recordingSaved();
@@ -1078,6 +1090,8 @@ void RecorderController::openRecording(QUrl file) {
         return;
     }
     lastFile_ = file.toLocalFile();
+    recordingRecoveryFolder_.clear();
+    recordingRecoveryRoot_.clear();
     emit lastFileChanged();
     emit editorRequested();
 }
@@ -1118,9 +1132,11 @@ void RecorderController::saveRecording(QUrl folder, QString name, bool overwrite
         name += "." + original.suffix();
     const auto target = QDir(folder.toLocalFile()).absoluteFilePath(name);
     const auto source = lastFile_;
+    const auto recoveryFolder = unsavedRecording_ ? recordingRecoveryFolder_ : QString();
+    const auto recoveryRoot = recordingRecoveryRoot_;
     setState("exporting");
-    saveFuture_.setFuture(QtConcurrent::run([source, target, overwrite] {
-        return luma::saveRecordingCopy(source, target, overwrite);
+    saveFuture_.setFuture(QtConcurrent::run([source, target, overwrite, recoveryRoot, recoveryFolder] {
+        return luma::saveRecordingAndCleanRecovery(source, target, overwrite, recoveryRoot, recoveryFolder);
     }));
 }
 void RecorderController::exportTrim(double start, double end, bool overwrite) {

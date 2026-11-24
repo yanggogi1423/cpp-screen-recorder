@@ -24,6 +24,9 @@ $redist=Get-ChildItem -LiteralPath "$vs/VC/Redist/MSVC" -Directory | Where-Objec
 $crt=Join-Path $redist.FullName 'x64/Microsoft.VC143.CRT'
 if(-not(Test-Path -LiteralPath "$crt/vcruntime140.dll")){throw 'App-local Microsoft C++ runtime missing'}
 Get-ChildItem -LiteralPath $crt -Filter '*.dll' | Copy-Item -Destination "$bundle/bin" -Force
+if(Test-Path -LiteralPath "$bundle/bin/vc_redist.x64.exe"){
+    Remove-Item -LiteralPath "$bundle/bin/vc_redist.x64.exe"
+}
 $qt=Join-Path $project '.deps/Qt/6.8.3/msvc2022_64'
 if($env:QT_ROOT_DIR){$qt=[IO.Path]::GetFullPath($env:QT_ROOT_DIR)}
 $licenses=Join-Path $bundle 'licenses/Qt'

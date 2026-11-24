@@ -21,6 +21,7 @@ inline QString recordingSizeText(qint64 bytes) {
 struct FileSaveResult {
     QString file, error;
     bool needsOverwrite = false;
+    QString cleanupWarning;
 };
 inline FileSaveResult saveRecordingCopy(const QString &source, const QString &target,
                                         bool overwrite) {

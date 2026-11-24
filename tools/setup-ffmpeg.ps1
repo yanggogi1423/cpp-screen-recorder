@@ -3,8 +3,7 @@ $ErrorActionPreference='Stop'
 $archive=Join-Path $PSScriptRoot 'ffmpeg-release-essentials.zip'
 $checksum="$archive.sha256"
 if(-not(Test-Path -LiteralPath $archive)){
-    Invoke-WebRequest 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile $archive -TimeoutSec 600
-    Invoke-WebRequest 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip.sha256' -OutFile $checksum -TimeoutSec 60
+    Invoke-WebRequest 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip' -OutFile $archive -TimeoutSec 600
 }
 if(-not(Test-Path -LiteralPath $checksum)){throw 'Missing FFmpeg checksum file.'}
 $expected=(Get-Content -LiteralPath $checksum -Raw).Trim().Split(' ')[0]

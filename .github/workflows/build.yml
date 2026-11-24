@@ -48,6 +48,13 @@ jobs:
           name: FARecorder-${{ runner.os }}-test-diagnostics
           path: build/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
+      - name: Upload Windows release files
+        if: runner.os == 'Windows' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FARecorder-Windows-release
+          path: dist/releases/
+          if-no-files-found: error
       - name: Upload development build
         uses: actions/upload-artifact@v4
         with:

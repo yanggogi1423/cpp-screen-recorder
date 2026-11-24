@@ -4,7 +4,7 @@
 
 A modern desktop recorder built with **C++20 + Qt 6 / QML**, with native capture backends for Windows and macOS.
 
-**0.5.1-beta.1 Windows 설치판을 배포합니다.** [다운로드 및 변경 내용](https://github.com/yanggogi1423/cpp-screen-recorder/releases/tag/v0.5.1-beta.1). 기능을 구현했다는 것과 실제 장비에서 검증했다는 것을 구분합니다. 최종 지원 상태와 테스트 증거는 [기능 점검표](docs/FEATURE_AUDIT.md)에 기록합니다. 베타(pre-release)이며 정식 안정 버전은 아닙니다.
+**0.5.2-beta.1 Windows 설치판을 배포합니다.** [다운로드 및 변경 내용](https://github.com/yanggogi1423/cpp-screen-recorder/releases/tag/v0.5.2-beta.1). 기능을 구현했다는 것과 실제 장비에서 검증했다는 것을 구분합니다. 최종 지원 상태와 테스트 증거는 [기능 점검표](docs/FEATURE_AUDIT.md)에 기록합니다. 베타(pre-release)이며 정식 안정 버전은 아닙니다.
 
 ![간소화 화면](docs/images/main.png)
 
@@ -42,7 +42,7 @@ A modern desktop recorder built with **C++20 + Qt 6 / QML**, with native capture
 
 ## 설치
 
-[Windows 설치 EXE 다운로드](https://github.com/yanggogi1423/cpp-screen-recorder/releases/download/v0.5.1-beta.1/FARecorder-0.5.1-beta.1-windows-x64-Setup.exe)를 실행하세요. 기본 위치는 `%LOCALAPPDATA%/Programs/FARecorder`이며, 관리자 권한 없이 현재 계정에 설치합니다. 시작 메뉴에서 FARecorder를 실행하고 Windows 설정의 설치된 앱에서 제거합니다. 기존 ZIP 사용자는 설치 EXE를 한 번 실행하면 기존 설정·녹화·복구 데이터를 이어서 사용합니다.
+[Windows 설치 EXE 다운로드](https://github.com/yanggogi1423/cpp-screen-recorder/releases/download/v0.5.2-beta.1/FARecorder-0.5.2-beta.1-windows-x64-Setup.exe)를 실행하세요. 기본 위치는 `%LOCALAPPDATA%/Programs/FARecorder`이며, 관리자 권한 없이 현재 계정에 설치합니다. 시작 메뉴에서 FARecorder를 실행하고 Windows 설정의 설치된 앱에서 제거합니다. 기존 ZIP 사용자는 설치 EXE를 한 번 실행하면 기존 설정·녹화·복구 데이터를 이어서 사용합니다.
 
 업데이트는 시작 약 3초 후와 실행 중 15분마다 확인합니다. **업데이트 시작**을 누르면 다운로드·SHA256 검증·적용 후 자동으로 다시 실행합니다. 녹화·편집·미저장 상태에서는 설치하지 않으며 새 버전 알림을 뒤로 미룹니다. 릴리즈의 ZIP은 기존 버전 호환 및 내부 업데이트용입니다.
 
@@ -63,7 +63,7 @@ Windows는 **Ctrl+R**로 시작/종료, **Ctrl+P**로 일시정지/재개합니�
 
 ## 오디오 저장과 믹서
 
-선택한 저장 폴더에는 시작 시간 기반 이름의 최종 MP4/MKV를 직접 저장합니다. 영상 원본 `video.mkv`(CPU/FFmpeg) 또는 `video.mp4`(GPU 직접), 개별 RF64 `.wav`, 작업 영상, 로그와 `session.json`은 앱의 로컬 데이터 `Recovery` 경로에 보관합니다. **파일 → 복구 파일 열기**로 접근할 수 있습니다. 미저장 상태로 명시적으로 종료해도 복구 데이터는 삭제하지 않습니다. RF64는 일반 WAV의 4 GiB 크기 한계를 피합니다. 미저장 녹화가 있으면 새 녹화나 다른 파일 열기보다 해당 저장을 먼저 완료하도록 안내합니다.
+선택한 저장 폴더에는 시작 시간 기반 이름의 최종 MP4/MKV를 직접 저장합니다. 영상 원본 `video.mkv`(CPU/FFmpeg) 또는 `video.mp4`(GPU 직접), 개별 RF64 `.wav`, 작업 영상, 로그와 `session.json`은 앱의 로컬 데이터 `Recovery` 경로에 최종 저장 전까지 보관합니다. **파일 → 복구 파일 열기**로 접근할 수 있습니다. 최종 파일 저장이 성공하면 해당 복구 폴더의 영상·WAV·작업 파일은 자동으로 삭제합니다. 저장 취소·실패·미저장 상태에서는 복구 데이터를 보존합니다. RF64는 일반 WAV의 4 GiB 크기 한계를 피합니다. 미저장 녹화가 있으면 새 녹화나 다른 파일 열기보다 해당 저장을 먼저 완료하도록 안내합니다.
 
 오디오가 2개 이상이면 일반 플레이어용 전체 믹스 트랙을 기본 트랙으로 추가하고, 독립 트랙도 함께 보관합니다. 멀티트랙을 지원하는 편집기에서 개별 트랙을 조절할 수 있습니다.
 
@@ -147,7 +147,7 @@ macOS 빌드/기본 테스트/배포는 CI에서 통과했습니다. 물리 Mac�
 
 ## 제품 정보
 
-프로그램 이름은 **FARecorder**, 제작자 표기는 GitHub 저장소 소유자 **yanggogi1423**입니다. 도움말에 현재 버전과 마지막 코드 업데이트 날짜(2026-11-05), [저장소](https://github.com/yanggogi1423/cpp-screen-recorder) 링크를 표시합니다. 업데이트 날짜는 마지막 확인 시각이나 자동 업데이트 확인 결과가 아닙니다.
+프로그램 이름은 **FARecorder**, 제작자 표기는 GitHub 저장소 소유자 **yanggogi1423**입니다. 도움말에 현재 버전과 마지막 코드 업데이트 날짜(2026-11-25), [저장소](https://github.com/yanggogi1423/cpp-screen-recorder) 링크를 표시합니다. 업데이트 날짜는 마지막 확인 시각이나 자동 업데이트 확인 결과가 아닙니다.
 
 이전 Luma 설정은 처음 실행할 때 저장 폴더·해상도·FPS·화면 모드를 가져옵니다. 새 이름에서는 MP4를 기본으로 시작하며, 이후 확장 화면에서 직접 선택한 형식은 유지합니다. 내부 C++ namespace / QML URI `Luma`는 호환성을 위해 유지합니다.
 

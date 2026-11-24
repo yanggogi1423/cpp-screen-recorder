@@ -2,6 +2,7 @@
 #include "WaveWriter.h"
 #include "RecordingFiles.h"
 #include "FinalizeProcess.h"
+#include "RecoveryFiles.h"
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -134,6 +135,8 @@ void RecordingSession::run(Platform *platform, VideoCapture *video, Settings s,
                 .filePath(recordingName + "_" + QUuid::createUuid().toString(QUuid::Id128).left(8));
         if (!QDir().mkpath(folder))
             throw std::runtime_error("녹화 폴더를 만들지 못했습니다.");
+        if (!markRecoveryFolder(folder))
+            throw std::runtime_error("복구 폴더의 식별 정보를 저장하지 못했습니다.");
         auto first = video->latestFrame();
         if (first.isNull())
             throw std::runtime_error("미리보기가 준비된 뒤 녹화를 시작해 주세요.");

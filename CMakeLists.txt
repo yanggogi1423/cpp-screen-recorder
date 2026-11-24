@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(FARecorder VERSION 0.5.1 LANGUAGES CXX)
+project(FARecorder VERSION 0.5.2 LANGUAGES CXX)
 if(MSVC AND DEFINED FAR_MSVC_INCLUDE_PREFIX)
   # Project-local correction for Korean-only MSVC installations whose detected
   # /showIncludes prefix was decoded incorrectly by CMake.
@@ -23,6 +23,7 @@ add_library(luma_core STATIC
   app/core/WaveWriter.h app/core/WaveWriter.cpp
   app/core/RecordingSession.h app/core/RecordingSession.cpp
   app/core/FinalizeProcess.h app/core/FinalizeProcess.cpp)
+target_sources(luma_core PRIVATE app/core/RecoveryFiles.h app/core/RecoveryFiles.cpp)
 target_include_directories(luma_core PUBLIC app)
 target_link_libraries(luma_core PUBLIC Qt6::Core Qt6::Gui)
 if(WIN32)
@@ -80,6 +81,9 @@ if(APPLE)
 endif()
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(recovery_tests tests/RecoveryTests.cpp)
+  target_link_libraries(recovery_tests PRIVATE luma_core)
+  add_test(NAME recovery_cleanup COMMAND recovery_tests)
   add_executable(update_manager_tests tests/UpdateManagerTests.cpp app/updates/UpdateManager.cpp app/updates/UpdateCatalog.cpp)
   target_include_directories(update_manager_tests PRIVATE app)
   target_link_libraries(update_manager_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Network)

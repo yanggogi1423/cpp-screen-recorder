@@ -432,11 +432,13 @@ int main(int argc, char **argv) {
                 QTimer::singleShot(2700, &app, [hotkey] { hotkey(GlobalHotkeys::RecordId); });
             });
         auto saveFlowStarted = std::make_shared<bool>(false);
+        auto savedRecovery = std::make_shared<QString>();
         QObject::connect(
-            &controller, &RecorderController::lastFileChanged, &app, [&, saveFlowStarted, fail] {
+            &controller, &RecorderController::lastFileChanged, &app, [&, saveFlowStarted, fail, savedRecovery] {
                 if (*saveFlowStarted)
                     return;
                 *saveFlowStarted = true;
+                *savedRecovery = QFileInfo(controller.lastFile().toLocalFile()).absolutePath();
                 QTimer::singleShot(350, &app, [&, fail] {
                     auto *root = engine.rootObjects().first();
                     auto *dialog = root->findChild<QObject *>("recordingSave");
@@ -543,7 +545,11 @@ int main(int argc, char **argv) {
                 });
             });
         QObject::connect(
-            &controller, &RecorderController::recordingSaved, &app, [&, compactReadbacks] {
+            &controller, &RecorderController::recordingSaved, &app, [&, compactReadbacks, savedRecovery] {
+                if (savedRecovery->isEmpty() || QFileInfo::exists(*savedRecovery)) {
+                    fail("Successful final save did not remove its Recovery session");
+                    return;
+                }
                 if (controller.hasUnsavedRecording() ||
                     QFileInfo(controller.lastFile().toLocalFile()).absolutePath() !=
                         QDir(controller.outputFolder().toLocalFile()).absolutePath()) {
@@ -562,6 +568,7 @@ int main(int argc, char **argv) {
                                           {"idleTimerVerified", true},
                                           {"unsavedExitVerified", true},
                                           {"flatOutputVerified", true},
+                                          {"recoveryCleaned", true},
                                           {"nativeGpu", arguments.contains("--native-gpu")},
                                           {"compactCpuReadbacks", double(*compactReadbacks)},
                                           {"hotkeysVerified", controller.globalHotkeysAvailable()}})

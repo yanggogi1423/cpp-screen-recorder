@@ -277,6 +277,7 @@ class RecorderController final : public QObject {
     PreviewProvider *preview_;
     QTimer previewTimer_, countdownTimer_;
     QString state_ = "idle", message_, sourceName_, lastFile_;
+    QString recordingRecoveryRoot_, recordingRecoveryFolder_;
     QString finalizationStatus_;
     int finalizationPercent_ = -1;
     QElapsedTimer finalizationTimer_;
